@@ -1,0 +1,62 @@
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #0E0E0E;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-family: 'Hanken Grotesk', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  color: #F4EFE7;
+  overflow-x: hidden;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar { height: 8px; width: 8px; }
+::-webkit-scrollbar-thumb { background: #2A2622; border-radius: 8px; }
+
+@keyframes gbfade {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes gbpole {
+  from { background-position: 0 0; }
+  to { background-position: 40px 0; }
+}
+@keyframes gbslide {
+  from { transform: translateX(100%); }
+  to { transform: none; }
+}
+@keyframes gbback {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+input, select, textarea, button {
+  font-family: 'Hanken Grotesk', system-ui, sans-serif;
+}
+input[type="text"], input[type="tel"], input[type="password"], textarea, select {
+  outline: none;
+}
+input[type="text"]:focus, input[type="tel"]:focus, input[type="password"]:focus,
+textarea:focus, select:focus {
+  border-color: #D6C3A0 !important;
+}
+
+/* Calendar mobile overrides */
+@media (max-width: 768px) {
+  .cal-grid-desktop { display: none !important; }
+  .cal-mobile-agenda { display: block !important; }
+  .cal-week-desktop { display: none !important; }
+  .cal-week-mobile { display: flex !important; flex-direction: column !important; gap: 10px !important; overflow-x: visible !important; }
+  .cal-side-panel { display: none !important; }
+}
+@media (min-width: 769px) {
+  .cal-mobile-agenda { display: none !important; }
+  .cal-week-mobile { display: none !important; }
+}
