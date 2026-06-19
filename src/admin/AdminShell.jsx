@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { BARBERS, OPEN, CLOSE } from '../data';
 import { iso, todayDate, dateFull, nowMin, slotFree } from '../helpers';
 import DashboardPage from './DashboardPage';
@@ -12,6 +12,9 @@ import AdminNewBookingDrawer from './AdminNewBookingDrawer';
 export default function AdminShell({ state, onState, goHome }) {
   const s = state;
   const [newBookingOpen, setNewBookingOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const onStateRef = useRef(onState);
+  useEffect(() => { onStateRef.current = onState; });
   const accent = '#D6C3A0';
   const hair = '#2A2622';
 
@@ -19,9 +22,20 @@ export default function AdminShell({ state, onState, goHome }) {
   const page = s.adminPage;
   const todayIso = iso(todayDate());
 
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const update = (e) => {
+      setIsMobile(e.matches);
+      if (e.matches) onStateRef.current({ adminNavOpen: false });
+    };
+    mq.addEventListener('change', update);
+    if (mq.matches) onStateRef.current({ adminNavOpen: false });
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
   const navBg = p => page===p ? 'rgba(214,195,160,0.14)' : 'transparent';
   const navCol = p => page===p ? accent : '#9A9388';
-  const setPage = p => { onState({adminPage:p,drawerId:null,custName:null}); window.scrollTo({top:0}); };
+  const setPage = p => { onState({adminPage:p,drawerId:null,custName:null,...(isMobile?{adminNavOpen:false}:{})}); window.scrollTo({top:0}); };
 
   const openDrawer = id => onState({drawerId:id,custName:null});
   const closeDrawer = () => onState({drawerId:null});
@@ -64,23 +78,36 @@ export default function AdminShell({ state, onState, goHome }) {
     collapse:  sv(<><path d="M15 18l-6-6 6-6"/></>),
     expand:    sv(<><path d="M9 18l6-6-6-6"/></>),
     signout:   sv(<><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12"/></>),
+    menu:      sv(<><path d="M3 6h18M3 12h18M3 18h18"/></>),
   };
+
+  const showLabel = navOpen || isMobile;
 
   const navBtn = (p, icon, label) => (
     <button onClick={()=>setPage(p)} title={label}
       style={{display:'flex',alignItems:'center',gap:'13px',cursor:'pointer',background:navBg(p),border:'none',borderRadius:'10px',padding:'11px 12px',color:navCol(p),fontFamily:"'Hanken Grotesk'",fontWeight:'600',fontSize:'14.5px',whiteSpace:'nowrap',width:'100%'}}>
       {icon}
-      {navOpen && <span>{label}</span>}
+      {showLabel && <span>{label}</span>}
     </button>
   );
 
+  const sidebarStyle = isMobile
+    ? {width:'232px',flexShrink:'0',position:'fixed',top:'0',left:'0',height:'100vh',display:'flex',flexDirection:'column',background:'#0B0B0B',borderRight:'1px solid #2A2622',transition:'transform 0.22s ease',transform:navOpen?'translateX(0)':'translateX(-100%)',overflow:'hidden',zIndex:'50'}
+    : {width:navOpen?'232px':'72px',flexShrink:'0',position:'sticky',top:'0',height:'100vh',display:'flex',flexDirection:'column',background:'#0B0B0B',borderRight:'1px solid #2A2622',transition:'width 0.18s ease',overflow:'hidden',zIndex:'20'};
+
   return (
     <div style={{display:'flex',minHeight:'100vh',background:'#141210'}}>
+      {/* MOBILE BACKDROP */}
+      {isMobile && navOpen && (
+        <div onClick={()=>onState({adminNavOpen:false})}
+          style={{position:'fixed',inset:'0',background:'rgba(0,0,0,0.65)',zIndex:'49',touchAction:'none'}}/>
+      )}
+
       {/* SIDEBAR */}
-      <aside style={{width:navOpen?'232px':'72px',flexShrink:'0',position:'sticky',top:'0',height:'100vh',display:'flex',flexDirection:'column',background:'#0B0B0B',borderRight:'1px solid #2A2622',transition:'width 0.18s ease',overflow:'hidden',zIndex:'20'}}>
+      <aside style={sidebarStyle}>
         <div style={{display:'flex',alignItems:'center',gap:'11px',height:'64px',padding:'0 16px',borderBottom:'1px solid #2A2622'}}>
           <img src="/assets/logo.jpg" alt="Guapito's" style={{height:'34px',width:'34px',objectFit:'cover',borderRadius:'7px',flexShrink:'0'}}/>
-          {navOpen && (
+          {showLabel && (
             <div style={{minWidth:'0'}}>
               <div style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.04em',fontSize:'15px',lineHeight:'1',whiteSpace:'nowrap'}}>Guapito's</div>
               <div style={{fontSize:'10.5px',color:accent,textTransform:'uppercase',letterSpacing:'0.16em',whiteSpace:'nowrap'}}>Staff</div>
@@ -94,38 +121,48 @@ export default function AdminShell({ state, onState, goHome }) {
           {navBtn('customers', icons.customers, 'Customers')}
         </nav>
         <div style={{padding:'12px',borderTop:'1px solid #2A2622',display:'flex',flexDirection:'column',gap:'6px'}}>
-          <button onClick={()=>onState(st=>({adminNavOpen:!st.adminNavOpen}))} title={navOpen?'Collapse':'Expand'}
-            style={{display:'flex',alignItems:'center',gap:'13px',cursor:'pointer',background:'transparent',border:'none',borderRadius:'10px',padding:'10px 12px',color:'#9A9388',fontSize:'14px',whiteSpace:'nowrap',width:'100%'}}>
-            {navOpen ? icons.collapse : icons.expand}
-            {navOpen && <span>Collapse</span>}
-          </button>
+          {!isMobile && (
+            <button onClick={()=>onState(st=>({adminNavOpen:!st.adminNavOpen}))} title={navOpen?'Collapse':'Expand'}
+              style={{display:'flex',alignItems:'center',gap:'13px',cursor:'pointer',background:'transparent',border:'none',borderRadius:'10px',padding:'10px 12px',color:'#9A9388',fontSize:'14px',whiteSpace:'nowrap',width:'100%'}}>
+              {navOpen ? icons.collapse : icons.expand}
+              {navOpen && <span>Collapse</span>}
+            </button>
+          )}
           <button onClick={()=>onState({adminAuthed:false,adminUser:'',adminPass:'',adminErr:'',view:'home'})} title="Sign out"
             style={{display:'flex',alignItems:'center',gap:'13px',cursor:'pointer',background:'transparent',border:'none',borderRadius:'10px',padding:'10px 12px',color:'#9A9388',fontSize:'14px',whiteSpace:'nowrap',width:'100%'}}>
             {icons.signout}
-            {navOpen && <span>Sign out</span>}
+            {showLabel && <span>Sign out</span>}
           </button>
         </div>
       </aside>
 
       {/* MAIN */}
-      <div style={{flex:'1',minWidth:'0',display:'flex',flexDirection:'column'}}>
+      <div style={{flex:'1',minWidth:'0',width:'100%',display:'flex',flexDirection:'column'}}>
         {/* TOPBAR */}
-        <header style={{position:'sticky',top:'0',zIndex:'15',display:'flex',alignItems:'center',gap:'16px',flexWrap:'wrap',minHeight:'64px',padding:'12px clamp(16px,3vw,32px)',background:'rgba(11,11,11,0.9)',backdropFilter:'blur(12px)',borderBottom:'1px solid #2A2622'}}>
+        <header style={{position:'sticky',top:'0',zIndex:'15',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap',minHeight:'64px',padding:'12px clamp(16px,3vw,32px)',background:'rgba(11,11,11,0.9)',backdropFilter:'blur(12px)',borderBottom:'1px solid #2A2622'}}>
+          {isMobile && (
+            <button onClick={()=>onState(st=>({adminNavOpen:!st.adminNavOpen}))}
+              style={{display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',background:'transparent',border:'none',borderRadius:'8px',padding:'8px',color:'#9A9388',flexShrink:'0'}}>
+              {icons.menu}
+            </button>
+          )}
           <div style={{minWidth:'0'}}>
             <h1 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',letterSpacing:'0.02em',fontSize:'clamp(20px,2.4vw,27px)',margin:'0',lineHeight:'1'}}>{pageTitles[page]}</h1>
             <div style={{fontSize:'12.5px',color:'#9A9388',marginTop:'2px'}}>{dateFull(todayIso)}</div>
           </div>
           <div style={{flex:'1',minWidth:'12px'}}></div>
           <div style={{display:'flex',alignItems:'center',gap:'14px',flexWrap:'wrap'}}>
-            <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
-              {BARBERS.map(b=>(
-                <span key={b.id} style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#9A9388'}}>
-                  <span style={{width:'9px',height:'9px',borderRadius:'50%',background:b.color}}></span>{b.name}
-                </span>
-              ))}
-            </div>
+            {!isMobile && (
+              <div style={{display:'flex',alignItems:'center',gap:'12px'}}>
+                {BARBERS.map(b=>(
+                  <span key={b.id} style={{display:'flex',alignItems:'center',gap:'6px',fontSize:'12px',color:'#9A9388'}}>
+                    <span style={{width:'9px',height:'9px',borderRadius:'50%',background:b.color}}></span>{b.name}
+                  </span>
+                ))}
+              </div>
+            )}
             <button onClick={()=>setNewBookingOpen(true)}
-              style={{cursor:'pointer',background:accent,color:'#0E0E0E',border:'none',borderRadius:'9px',padding:'11px 18px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.05em',textTransform:'uppercase',fontSize:'13.5px',whiteSpace:'nowrap'}}>+ New booking</button>
+              style={{cursor:'pointer',background:accent,color:'#0E0E0E',border:'none',borderRadius:'9px',padding:'11px 18px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.05em',textTransform:'uppercase',fontSize:'13.5px',whiteSpace:'nowrap'}}>{isMobile?'+ New':'+ New booking'}</button>
           </div>
         </header>
 
