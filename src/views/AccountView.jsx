@@ -24,7 +24,7 @@ export default function AccountView({ bookings, user, goBook, onState, onUpdateB
 
   return (
     <main style={{maxWidth:'820px',margin:'0 auto',padding:'clamp(28px,5vw,52px) clamp(16px,4vw,32px) 80px',animation:'gbfade 0.4s ease both'}}>
-      <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:accent,marginBottom:'10px'}}>{user.name?'Hello, '+user.name.split(' ')[0]:'Guest'}</div>
+      <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:accent,marginBottom:'10px'}}>{user.firstName?'Hello, '+user.firstName:'Guest'}</div>
       <h1 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(30px,5vw,52px)',margin:'0 0 30px',lineHeight:'1'}}>My appointments</h1>
 
       <div style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.12em',fontSize:'14px',color:'#F4EFE7',marginBottom:'14px'}}>Upcoming</div>
