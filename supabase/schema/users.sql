@@ -5,7 +5,8 @@ create table if not exists public.users (
   last_name  text,
   mobile     text not null default '',
   email      text unique,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  login_timestamp timestamptz   -- last successful sign-in; drives 24h absolute expiry
 );
 create index if not exists users_mobile_idx on public.users (mobile);
 

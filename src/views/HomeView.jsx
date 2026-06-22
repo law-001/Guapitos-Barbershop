@@ -119,19 +119,30 @@ export default function HomeView({ goBook, goAccount, goAdmin, navServices }) {
             </div>
             <div style={{marginTop:'26px',color:'#D9D3C9',lineHeight:'1.7'}}>
               <div style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.1em',fontSize:'13px',color:'#9A9388',marginBottom:'4px'}}>Address</div>
-              <div>Ground Floor, [Building / Mall name]</div>
-              <div>[Street], [City], Philippines</div>
+              <div>2nd Floor, JIVC Building, MacArthur Hwy</div>
+              <div>Lolomboy, Bocaue, 3018 Bulacan</div>
               <div style={{marginTop:'14px',fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.1em',fontSize:'13px',color:'#9A9388',marginBottom:'4px'}}>Contact</div>
               <div>[Mobile number] · [@instagram]</div>
             </div>
             <button onClick={goBook} style={{marginTop:'28px',background:'#D6C3A0',color:'#0E0E0E',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.08em',textTransform:'uppercase',fontSize:'15px',border:'none',borderRadius:'8px',padding:'14px 26px',cursor:'pointer'}}>Book your chair</button>
           </div>
           <div style={{position:'relative',minHeight:'280px',borderRadius:'16px',overflow:'hidden',border:'1px solid #2A2622',background:'linear-gradient(135deg,#1a1714,#0E0E0E)'}}>
-            <div style={{position:'absolute',inset:'0',background:'repeating-conic-gradient(from 30deg,#141210 0deg 60deg,#1b1813 60deg 120deg,#100e0c 120deg 180deg)',opacity:'0.5'}}></div>
-            <div style={{position:'absolute',inset:'0',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:'10px',fontFamily:"'Oswald'",letterSpacing:'0.18em',textTransform:'uppercase',color:'#9A9388'}}>
-              <span style={{width:'14px',height:'46px',borderRadius:'5px',background:'repeating-linear-gradient(135deg,#D6C3A0 0 7px,#15130F 7px 14px)',backgroundSize:'40px 100%',animation:'gbpole 1.6s linear infinite'}}></span>
-              <span style={{fontSize:'13px'}}>Map embed goes here</span>
-            </div>
+            <iframe
+              title="Guapito's Barbershop location"
+              src="https://www.google.com/maps?q=14.7755806,120.9387192&z=17&output=embed"
+              style={{position:'absolute',inset:'0',width:'100%',height:'100%',border:0,filter:'grayscale(0.3) contrast(1.05)'}}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+              allowFullScreen
+            />
+            <a
+              href="https://www.google.com/maps/dir/?api=1&destination=14.7755806,120.9387192"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{position:'absolute',right:'14px',bottom:'14px',display:'flex',alignItems:'center',gap:'8px',background:'#D6C3A0',color:'#0E0E0E',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'13px',textDecoration:'none',borderRadius:'8px',padding:'10px 16px',boxShadow:'0 4px 14px rgba(0,0,0,0.4)'}}
+            >
+              ➤ Get directions
+            </a>
           </div>
         </div>
       </section>

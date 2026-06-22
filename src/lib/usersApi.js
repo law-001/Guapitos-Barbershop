@@ -18,6 +18,7 @@ const fromRow = (r) => ({
   firstName: r.first_name || '',
   lastName: r.last_name || '',
   mobile: r.mobile || '',
+  loginAt: r.login_timestamp || null,   // ISO string of last sign-in, or null
 })
 
 // Fetch a saved customer by email. Returns null when none exists (new customer).
@@ -42,4 +43,28 @@ export async function upsertUser({ email, firstName, lastName, mobile }) {
   }
   const { error } = await supabase.from(TABLE).upsert(row, { onConflict: 'email' })
   if (error) throw error
+}
+
+// Stamp the customer's login time = now on a successful sign-in. Upsert touches
+// only id/email/login_timestamp, so an existing profile's name/mobile are kept.
+// Returns the ISO timestamp written. This is the ONLY place the clock is set, so
+// token auto-refresh and page reloads never move it (absolute, not sliding).
+export async function touchLogin(email) {
+  const addr = norm(email)
+  if (!addr) return null
+  const ts = new Date().toISOString()
+  const { error } = await supabase
+    .from(TABLE)
+    .upsert({ id: idForEmail(addr), email: addr, login_timestamp: ts }, { onConflict: 'email' })
+  if (error) throw error
+  return ts
+}
+
+// Read just the stored login timestamp for this email (null when no row yet).
+export async function fetchLoginAt(email) {
+  const addr = norm(email)
+  if (!addr) return null
+  const { data, error } = await supabase.from(TABLE).select('login_timestamp').eq('email', addr).maybeSingle()
+  if (error) throw error
+  return data?.login_timestamp || null
 }
