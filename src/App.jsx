@@ -195,14 +195,51 @@ export default function App() {
     }
   };
 
-  // Pull a readable string out of whatever Supabase / the network throws.
-  // Guaranteed non-empty and never an object (a bare Error/{} renders as `{}`).
+  // Turn whatever Supabase / the network throws into a clear, human message.
+  // Guaranteed non-empty and never a bare object (which would render as `{}`).
+  // Maps known cases to friendly text; falls back to a sensible default so the
+  // user always sees actionable guidance instead of `{}` or silence.
   const authMsg = (e) => {
     if (typeof e === 'string' && e.trim()) return e;
-    const m = e?.message || e?.error_description || e?.msg || e?.error || e?.hint;
-    if (m) return String(m);
-    try { const j = JSON.stringify(e); if (j && j !== '{}') return j; } catch { /* circular — ignore */ }
-    return 'Could not reach the email service. Check your connection and Supabase keys, then try again.';
+
+    // Config never reached the build — env vars missing on the host (e.g. Vercel).
+    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) {
+      return 'Sign-in is not configured on this site (missing Supabase keys). Contact the shop.';
+    }
+
+    const raw = String(e?.message || e?.error_description || e?.msg || e?.error || e?.hint || e?.name || '');
+    const status = e?.status ?? e?.statusCode ?? e?.code;
+    const t = raw.toLowerCase();
+
+    // Network / CORS / bad URL — request never got a real HTTP response.
+    if (t.includes('failed to fetch') || t.includes('networkerror') || t.includes('load failed') ||
+        e?.name === 'TypeError' || e?.name === 'AuthRetryableFetchError') {
+      return "Couldn't reach the email service. Check your connection and try again.";
+    }
+    // Too many requests — Supabase rate-limits OTP sends.
+    if (status === 429 || t.includes('rate limit') || t.includes('too many') || t.includes('only request this after')) {
+      return 'Too many attempts. Please wait a minute, then request a new code.';
+    }
+    // Wrong / expired OTP on the verify step.
+    if (t.includes('expired') || t.includes('invalid') && (t.includes('otp') || t.includes('token') || t.includes('code'))) {
+      return 'That code is incorrect or expired. Request a new one and try again.';
+    }
+    // Email couldn't be sent (SMTP / template / provider issue).
+    if (t.includes('error sending') || t.includes('smtp') || t.includes('email') && status >= 500) {
+      return "We couldn't send the email right now. Please try again in a moment.";
+    }
+    // Malformed email address rejected by the API.
+    if (status === 400 || t.includes('invalid email') || t.includes('email address')) {
+      return 'That email address looks invalid. Please double-check it.';
+    }
+    // Server-side fault.
+    if (typeof status === 'number' && status >= 500) {
+      return 'The email service is temporarily unavailable. Please try again shortly.';
+    }
+    // Known message text we didn't special-case — surface it as-is.
+    if (raw.trim()) return raw;
+    // Last resort — never let an empty object reach the UI as `{}`.
+    return 'Something went wrong sending your code. Please try again.';
   };
 
   // When Supabase email is unavailable, let DEV keep moving with a local code.
