@@ -1,10 +1,11 @@
 import { SERVICES, CATS, BARBERS } from '../data';
 import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, addDays, genId } from '../helpers';
 
-export default function BookingView({ state, goHome, goAccount, goBook, onState, onCreateBooking, onUpdateBooking, onSendOtp, onVerifyOtp, leadHours=1, onlinePayEnabled=true }) {
+export default function BookingView({ state, goHome, goAccount, goBook, onState, onCreateBooking, onUpdateBooking, onSendOtp, onVerifyOtp, onSaveProfile, leadHours=1, onlinePayEnabled=true }) {
   const s = state;
   const accent='#D6C3A0', hair='#2A2622';
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.emailInput.trim());
+  const fullName = `${s.user.firstName} ${s.user.lastName}`.trim();
 
   const navOrder = () => {
     const o=['service','barber','datetime'];
@@ -26,7 +27,7 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
   const continueDisabled = () => {
     if(s.step==='service') return s.cart.length===0;
     if(s.step==='datetime') return !(s.date && s.time!=null);
-    if(s.step==='details') return !(s.user.name.trim() && s.user.mobile.trim());
+    if(s.step==='details') return !(s.user.firstName.trim() && s.user.lastName.trim() && s.user.mobile.trim());
     if(s.step==='payment') return !s.payMethod;
     return false;
   };
@@ -35,6 +36,7 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
   const onContinue = () => {
     if(disabled) return;
     if(s.step==='datetime' && s.reschedulingId){ saveReschedule(); return; }
+    if(s.step==='details'){ onSaveProfile?.(s.user); }   // persist name + mobile for next time
     if(s.step==='payment'){ finalize(); return; }
     const i=order.indexOf(s.step);
     onState({step:order[i+1]});
@@ -62,7 +64,7 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     const assigned = s.barber==='any' ? firstFreeLocal(s.date,s.time,dur,null) : s.barber;
     const ref='GB-'+Math.random().toString(36).slice(2,7).toUpperCase();
     const names=s.cart.map(id=>svcById(id).name);
-    const bk={id:genId('u'),date:s.date,start:s.time,dur,barber:assigned,service:names.join(' + '),price:totalPrice(),customer:s.user.name||'You',status:'booked',mine:true,pay:s.payMethod,notes:s.notes,followUp:false};
+    const bk={id:genId('u'),date:s.date,start:s.time,dur,barber:assigned,service:names.join(' + '),price:totalPrice(),customer:fullName||'You',status:'booked',mine:true,pay:s.payMethod,notes:s.notes,followUp:false};
     onCreateBooking(bk);
     onState({lastRef:ref,lastBooking:bk,step:'confirmation'});
     window.scrollTo({top:0});
@@ -215,6 +217,11 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
             {s.authStep==='otp' && (
               <>
                 <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Enter the 8-digit code sent to {s.emailInput||'your email'}</label>
+                {s.devCode && (
+                  <div style={{background:'rgba(214,195,160,0.1)',border:'1px dashed '+accent,borderRadius:'10px',padding:'10px 12px',marginBottom:'12px',fontSize:'13px',color:'#9A9388'}}>
+                    Email service is down — <b style={{color:accent}}>dev mode</b>. Use code <b style={{color:accent,letterSpacing:'0.15em'}}>{s.devCode}</b>
+                  </div>
+                )}
                 <input type="text" inputMode="numeric" value={s.otpInput}
                   onChange={e=>onState({otpInput:e.target.value.replace(/\D/g,'').slice(0,8),authErr:''})}
                   onKeyDown={e=>{ if(e.key==='Enter' && s.otpInput.length===8 && !s.authBusy) onVerifyOtp(s.emailInput,s.otpInput); }}
@@ -241,10 +248,17 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
           <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(26px,4vw,40px)',margin:'0 0 6px'}}>Your details</h2>
           <p style={{color:'#9A9388',margin:'0 0 26px'}}>So your barber knows who's coming in — and what you're after.</p>
           <div style={{maxWidth:'480px',display:'flex',flexDirection:'column',gap:'16px'}}>
-            <div>
-              <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Name</label>
-              <input value={s.user.name} onChange={e=>onState(st=>({user:{...st.user,name:e.target.value}}))} placeholder="Your name"
-                style={{width:'100%',background:'#1D1A15',border:'1px solid #2A2622',borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'16px'}}/>
+            <div style={{display:'flex',gap:'12px',flexWrap:'wrap'}}>
+              <div style={{flex:'1',minWidth:'140px'}}>
+                <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>First name</label>
+                <input value={s.user.firstName} onChange={e=>onState(st=>({user:{...st.user,firstName:e.target.value}}))} placeholder="Juan" autoComplete="given-name"
+                  style={{width:'100%',boxSizing:'border-box',background:'#1D1A15',border:'1px solid #2A2622',borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'16px'}}/>
+              </div>
+              <div style={{flex:'1',minWidth:'140px'}}>
+                <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Last name</label>
+                <input value={s.user.lastName} onChange={e=>onState(st=>({user:{...st.user,lastName:e.target.value}}))} placeholder="Dela Cruz" autoComplete="family-name"
+                  style={{width:'100%',boxSizing:'border-box',background:'#1D1A15',border:'1px solid #2A2622',borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'16px'}}/>
+              </div>
             </div>
             <div>
               <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Mobile</label>

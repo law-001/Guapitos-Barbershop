@@ -2,10 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { iso, todayDate, timeLabel } from './helpers';
 import { fetchBookings, insertBooking, updateBooking as apiUpdateBooking } from './lib/bookingsApi';
-import { sendEmailOtp, verifyEmailOtp } from './lib/auth';
+import { sendEmailOtp, verifyEmailOtp, signOut } from './lib/auth';
+import { fetchUser, upsertUser } from './lib/usersApi';
 import HomeView from './views/HomeView';
 import BookingView from './views/BookingView';
 import AccountView from './views/AccountView';
+import ProfileView from './views/ProfileView';
 import AdminLogin from './admin/AdminLogin';
 import AdminShell from './admin/AdminShell';
 import Dialog from './Dialog';
@@ -20,12 +22,13 @@ const initState = {
   barber: 'any',
   date: null,
   time: null,
-  user: { signedIn: false, name: '', mobile: '', email: '' },
+  user: { signedIn: false, firstName: '', lastName: '', mobile: '', email: '' },
   authStep: 'email',     // 'email' (enter address) | 'otp' (enter code)
   emailInput: '',
   otpInput: '',
   authBusy: false,       // true while a Supabase auth request is in flight
   authErr: '',           // sign-in error message to show under the field
+  devCode: '',           // DEV-only fallback OTP when Supabase email is unavailable
   notes: '',
   payMethod: null,
   lastRef: null,
@@ -157,7 +160,19 @@ export default function App() {
   const goHome = () => { onState({ view: 'home' }); window.scrollTo({ top: 0 }); };
   const goBook = () => { onState({ view: 'book', step: 'service', cart: [], barber: 'any', date: null, time: null, payMethod: null, notes: '', reschedulingId: null, authStep: 'email', emailInput: '', otpInput: '', authBusy: false, authErr: '' }); window.scrollTo({ top: 0 }); };
   const goAccount = () => { onState({ view: 'account' }); window.scrollTo({ top: 0 }); };
+  const goProfile = () => { onState({ view: 'profile' }); window.scrollTo({ top: 0 }); };
   const goAdmin = () => { onState({ view: 'admin' }); window.scrollTo({ top: 0 }); };
+
+  // Sign out — clear the Supabase session and reset the local user, back home.
+  const onSignOut = async () => {
+    try { await signOut(); } catch (e) { console.error('signOut failed', e); }
+    onState({
+      view: 'home',
+      user: { signedIn: false, firstName: '', lastName: '', mobile: '', email: '' },
+      authStep: 'email', emailInput: '', otpInput: '', authErr: '', devCode: '',
+    });
+    window.scrollTo({ top: 0 });
+  };
 
   const navServices = () => {
     onState({ view: 'home' });
@@ -180,24 +195,100 @@ export default function App() {
     }
   };
 
+  // Pull a readable string out of whatever Supabase / the network throws.
+  // Guaranteed non-empty and never an object (a bare Error/{} renders as `{}`).
+  const authMsg = (e) => {
+    if (typeof e === 'string' && e.trim()) return e;
+    const m = e?.message || e?.error_description || e?.msg || e?.error || e?.hint;
+    if (m) return String(m);
+    try { const j = JSON.stringify(e); if (j && j !== '{}') return j; } catch { /* circular — ignore */ }
+    return 'Could not reach the email service. Check your connection and Supabase keys, then try again.';
+  };
+
+  // When Supabase email is unavailable, let DEV keep moving with a local code.
+  const devFallback = (addr) => {
+    const code = String(Math.floor(10000000 + Math.random() * 90000000)); // 8 digits
+    console.warn('[DEV] Supabase email unavailable — using local code:', code);
+    onState({ authBusy: false, authStep: 'otp', emailInput: addr, devCode: code, authErr: '' });
+  };
+
   // Booking sign-in: email one-time-password via Supabase.
   const onSendOtp = async (email) => {
     const addr = email.trim();
     if(!addr) return;
-    onState({ authBusy: true, authErr: '' });
-    const { error } = await sendEmailOtp(addr);
-    if(error){ onState({ authBusy: false, authErr: error.message }); return; }
-    onState({ authBusy: false, authStep: 'otp', emailInput: addr });
+    onState({ authBusy: true, authErr: '', devCode: '' });
+    try {
+      const { error } = await sendEmailOtp(addr);
+      if(error){
+        console.error('sendEmailOtp error', error);
+        if(import.meta.env.DEV){ devFallback(addr); return; }   // email down → local code in dev
+        onState({ authBusy: false, authErr: authMsg(error) }); return;
+      }
+      onState({ authBusy: false, authStep: 'otp', emailInput: addr });
+    } catch (e) {
+      // Thrown (network down, bad URL/key, CORS) — without this the button
+      // would hang on "Sending…" forever with no message.
+      console.error('sendEmailOtp threw', e);
+      if(import.meta.env.DEV){ devFallback(addr); return; }
+      onState({ authBusy: false, authErr: authMsg(e) });
+    }
   };
 
   const onVerifyOtp = async (email, token) => {
     const code = token.trim();
     if(!code) return;
+    const addr = email.trim();
     onState({ authBusy: true, authErr: '' });
-    const { error } = await verifyEmailOtp(email.trim(), code);
-    if(error){ onState({ authBusy: false, authErr: error.message }); return; }
-    onState(st => ({ authBusy: false, otpInput: '', user: { ...st.user, signedIn: true, email: email.trim() }, step: 'details' }));
+    // DEV fallback path: Supabase email was down, so we verify against the
+    // locally-generated code instead of calling Supabase.
+    if(state.devCode){
+      if(code !== state.devCode){ onState({ authBusy: false, authErr: 'Incorrect code. Use the dev code shown above.' }); return; }
+      await finishSignIn(addr);
+      return;
+    }
+    let error;
+    try {
+      ({ error } = await verifyEmailOtp(addr, code));
+    } catch (e) {
+      console.error('verifyEmailOtp threw', e);
+      onState({ authBusy: false, authErr: authMsg(e) }); return;
+    }
+    if(error){ console.error('verifyEmailOtp error', error); onState({ authBusy: false, authErr: authMsg(error) }); return; }
+    await finishSignIn(addr);
+  };
+
+  // Shared post-verification step: load saved profile, prefill, go to details.
+  const finishSignIn = async (addr) => {
+    // Verification succeeded — pull any saved profile so a returning email
+    // auto-fills first/last name + mobile in the details step.
+    let saved = null;
+    try { saved = await fetchUser(addr); } catch { /* table missing / offline — just don't prefill */ }
+    onState(st => ({
+      authBusy: false,
+      otpInput: '',
+      devCode: '',
+      user: {
+        ...st.user,
+        signedIn: true,
+        email: addr,
+        firstName: saved ? saved.firstName : st.user.firstName,
+        lastName: saved ? saved.lastName : st.user.lastName,
+        mobile: saved ? saved.mobile : st.user.mobile,
+      },
+      step: 'details',
+    }));
     window.scrollTo({ top: 0 });
+  };
+
+  // Persist the customer's details to the DB so the next verification of this
+  // email auto-fills. Called when leaving the details step.
+  const onSaveProfile = async (user) => {
+    if(!user?.email) return;
+    try {
+      await upsertUser({ email: user.email, firstName: user.firstName, lastName: user.lastName, mobile: user.mobile });
+    } catch (e) {
+      console.error('Failed to save user', e);
+    }
   };
 
   const isAdmin = state.view === 'admin';
@@ -213,6 +304,16 @@ export default function App() {
           <button onClick={goAccount} style={{ background: 'transparent', border: 'none', color: '#F4EFE7', fontFamily: "'Hanken Grotesk'", fontWeight: '600', fontSize: '14px', cursor: 'pointer', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '7px' }}>
             <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#D6C3A0' }}></span>My Appointments
           </button>
+          {/* Profile tab — shows the signed-in email; a Sign in chip otherwise. */}
+          {state.user.signedIn ? (
+            <button onClick={goProfile} title={`Signed in as ${state.user.email}`}
+              style={{ background: 'rgba(214,195,160,0.1)', border: '1px solid #2A2622', color: '#F4EFE7', fontFamily: "'Hanken Grotesk'", fontWeight: '600', fontSize: '14px', cursor: 'pointer', padding: '7px 12px 7px 8px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '9px', maxWidth: '220px' }}>
+              <span style={{ flexShrink: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '26px', height: '26px', borderRadius: '50%', background: '#D6C3A0', color: '#0E0E0E', fontFamily: "'Oswald'", fontWeight: '700', fontSize: '14px' }}>{(state.user.firstName || state.user.email).trim().charAt(0).toUpperCase()}</span>
+              <span style={{ minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{state.user.email}</span>
+            </button>
+          ) : (
+            <button onClick={goProfile} style={{ background: 'transparent', border: 'none', color: '#9A9388', fontFamily: "'Hanken Grotesk'", fontWeight: '600', fontSize: '14px', cursor: 'pointer', padding: '8px 10px' }}>Profile</button>
+          )}
           <button onClick={goBook} style={{ background: '#D6C3A0', color: '#0E0E0E', fontFamily: "'Oswald'", fontWeight: '600', letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '14px', border: 'none', borderRadius: '7px', padding: '11px 20px', cursor: 'pointer' }}>Book Now</button>
         </header>
       )}
@@ -223,11 +324,15 @@ export default function App() {
       )}
 
       {state.view === 'book' && (
-        <BookingView state={state} goHome={goHome} goAccount={goAccount} goBook={goBook} onState={onState} onCreateBooking={onCreateBooking} onUpdateBooking={onUpdateBooking} onSendOtp={onSendOtp} onVerifyOtp={onVerifyOtp} />
+        <BookingView state={state} goHome={goHome} goAccount={goAccount} goBook={goBook} onState={onState} onCreateBooking={onCreateBooking} onUpdateBooking={onUpdateBooking} onSendOtp={onSendOtp} onVerifyOtp={onVerifyOtp} onSaveProfile={onSaveProfile} />
       )}
 
       {state.view === 'account' && (
         <AccountView bookings={state.bookings} user={state.user} goBook={goBook} onState={onState} onUpdateBooking={onUpdateBooking} showAlert={showAlert} />
+      )}
+
+      {state.view === 'profile' && (
+        <ProfileView user={state.user} goBook={goBook} onSignOut={onSignOut} />
       )}
 
       {state.view === 'admin' && !state.adminAuthed && (

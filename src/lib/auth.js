@@ -17,3 +17,7 @@ export async function sendEmailOtp(email) {
 export async function verifyEmailOtp(email, token) {
   return supabase.auth.verifyOtp({ email, token, type: 'email' })
 }
+
+export async function signOut() {
+  return supabase.auth.signOut()
+}
