@@ -2,8 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { iso, todayDate, timeLabel } from './helpers';
 import { fetchBookings, insertBooking, updateBooking as apiUpdateBooking } from './lib/bookingsApi';
-import { sendEmailOtp, verifyEmailOtp, signOut } from './lib/auth';
-import { fetchUser, upsertUser } from './lib/usersApi';
+import { sendEmailOtp, verifyEmailOtp, signOut, getSession, onAuthChange } from './lib/auth';
+import { setRemember } from './lib/supabase';
+import { fetchUser, upsertUser, touchLogin } from './lib/usersApi';
+import { isExpired, isSessionExpired } from './lib/session';
 import HomeView from './views/HomeView';
 import BookingView from './views/BookingView';
 import AccountView from './views/AccountView';
@@ -15,6 +17,14 @@ import Toast from './Toast';
 
 const todayIso = iso(todayDate());
 
+// --- Login session (email verification) -------------------------------------
+// Logging in = verifying an email OTP. The session itself is owned by Supabase
+// (server-side): it lives in storage, auto-refreshes, and expires when the
+// dashboard's session lifetime lapses, after which you must verify again.
+// "Remember me" only chooses where it's stored on this device (see lib/supabase
+// rememberStorage: localStorage = survives a browser restart, sessionStorage =
+// cleared on close). We just mirror Supabase's signed-in state into the UI.
+
 const initState = {
   view: 'home',
   step: 'service',
@@ -24,6 +34,7 @@ const initState = {
   time: null,
   user: { signedIn: false, firstName: '', lastName: '', mobile: '', email: '' },
   authStep: 'email',     // 'email' (enter address) | 'otp' (enter code)
+  remember: true,        // "Remember me" — keep the session after the browser closes
   emailInput: '',
   otpInput: '',
   authBusy: false,       // true while a Supabase auth request is in flight
@@ -60,6 +71,8 @@ const overdueBooked = (rows, now = Date.now()) =>
   rows.filter(b => b.status === 'booked' && apptStartMs(b) + NOSHOW_GRACE_MS < now);
 
 export default function App() {
+  // The Supabase session is read asynchronously on mount (see the rehydrate
+  // effect below), so start signed-out and let that effect sign us back in.
   const [state, setState] = useState(initState);
 
   const onState = (updater) => {
@@ -73,6 +86,51 @@ export default function App() {
   // Latest bookings, readable from interval callbacks without stale closures.
   const bookingsRef = useRef(state.bookings);
   useEffect(() => { bookingsRef.current = state.bookings; });
+
+  // Current signed-in flag + user, kept fresh so the interval/subscription
+  // callbacks below read them without stale closures or re-subscribing.
+  const signedInRef = useRef(state.user.signedIn);
+  useEffect(() => { signedInRef.current = state.user.signedIn; });
+  const userRef = useRef(state.user);
+  useEffect(() => { userRef.current = state.user; });
+
+  // Set true while WE are intentionally signing out (manual or expiry) so the
+  // auth-change subscription doesn't treat our own signOut() as an external
+  // session loss and double-fire the expiry toast.
+  const signingOutRef = useRef(false);
+
+  // Tear down the session: clear Supabase's tokens (server + local storage),
+  // reset the UI to signed-out, bounce off any protected view, and show `message`.
+  const expireRef = useRef(async () => {});
+  useEffect(() => {
+    expireRef.current = async (message) => {
+      signingOutRef.current = true;
+      try { await signOut(); } catch (e) { console.error('signOut failed', e); }
+      onState(st => ({
+        user: { signedIn: false, firstName: '', lastName: '', mobile: '', email: '' },
+        view: st.view === 'account' || st.view === 'profile' ? 'home' : st.view,
+        authStep: 'email', emailInput: '', otpInput: '', authErr: '', devCode: '',
+        toast: { message, type: 'info' },
+        toastN: st.toastN + 1,
+      }));
+      // Release the guard after the SIGNED_OUT event has settled.
+      setTimeout(() => { signingOutRef.current = false; }, 1500);
+    };
+  });
+
+  // Absolute-expiry validation: compare now against the DB login_timestamp and,
+  // if past the configured max, force re-authentication. Used on startup, on
+  // protected-page access, and on a periodic interval.
+  const validateRef = useRef(async () => {});
+  useEffect(() => {
+    validateRef.current = async () => {
+      const u = userRef.current;
+      if (!u.signedIn || !u.email) return;
+      if (await isSessionExpired(u.email)) {
+        await expireRef.current('Your session has expired. Please sign in again.');
+      }
+    };
+  });
 
   // Mark overdue 'booked' appointments as No Show (status + persist + one toast).
   const applyNoShows = (overdue) => {
@@ -102,6 +160,51 @@ export default function App() {
     const t = setInterval(() => sweepRef.current(overdueBooked(bookingsRef.current)), 60000);
     return () => clearInterval(t);
   }, []);
+
+  // Mirror the Supabase (server-side) session into the UI. On mount we rehydrate
+  // from a still-valid session — pulling the saved profile so a refresh keeps the
+  // user signed in with their details prefilled — but FIRST enforce the absolute
+  // 24h cutoff against the stored login_timestamp, so returning after the window
+  // (even from a closed browser) forces re-authentication instead of restoring.
+  // We then subscribe to auth changes: if the session vanishes externally (server
+  // expiry, refresh-token death, sign-out in another tab) we sign out locally too.
+  useEffect(() => {
+    let active = true;
+    getSession().then(async (session) => {
+      if (!active || !session?.user?.email) return;
+      const addr = session.user.email;
+      let saved = null;
+      try { saved = await fetchUser(addr); } catch { /* offline / no row — just don't prefill */ }
+      if (saved && isExpired(saved.loginAt)) {
+        await expireRef.current('Your session has expired. Please sign in again.');
+        return;
+      }
+      onState({ user: {
+        signedIn: true, email: addr,
+        firstName: saved?.firstName || '', lastName: saved?.lastName || '', mobile: saved?.mobile || '',
+      } });
+    }).catch(err => console.error('getSession failed', err));
+
+    const unsub = onAuthChange((session) => {
+      if (!session && signedInRef.current && !signingOutRef.current) {
+        expireRef.current('Your session expired — please sign in again.');
+      }
+    });
+    return () => { active = false; unsub(); };
+  }, []);
+
+  // Re-validate the absolute cutoff periodically while the app stays open, so a
+  // tab left running past the window gets signed out without needing a refresh.
+  useEffect(() => {
+    const t = setInterval(() => { validateRef.current(); }, 60000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Protected-page access: re-check the cutoff whenever the user lands on a view
+  // that requires being signed in (their appointments / profile).
+  useEffect(() => {
+    if (state.view === 'account' || state.view === 'profile') validateRef.current();
+  }, [state.view]);
 
   // Toast notification (see Toast.jsx). `toastN` bumps so the same message re-shows.
   // opts: { linkText, action } — renders a clickable link in the toast.
@@ -159,20 +262,28 @@ export default function App() {
 
   const goHome = () => { onState({ view: 'home' }); window.scrollTo({ top: 0 }); };
   const goBook = () => { onState({ view: 'book', step: 'service', cart: [], barber: 'any', date: null, time: null, payMethod: null, notes: '', reschedulingId: null, authStep: 'email', emailInput: '', otpInput: '', authBusy: false, authErr: '' }); window.scrollTo({ top: 0 }); };
-  const goAccount = () => { onState({ view: 'account' }); window.scrollTo({ top: 0 }); };
+  const goAccount = () => { onState(s => s.user.signedIn ? { view: 'account' } : { view: 'account', authStep: 'email', emailInput: '', otpInput: '', authBusy: false, authErr: '', devCode: '' }); window.scrollTo({ top: 0 }); };
   const goProfile = () => { onState({ view: 'profile' }); window.scrollTo({ top: 0 }); };
   const goAdmin = () => { onState({ view: 'admin' }); window.scrollTo({ top: 0 }); };
 
   // Sign out — clear the Supabase session and reset the local user, back home.
+  // Guard so the auth-change subscription doesn't read our own signOut() as an
+  // external session loss and tack on an "expired" toast.
   const onSignOut = async () => {
+    signingOutRef.current = true;
     try { await signOut(); } catch (e) { console.error('signOut failed', e); }
     onState({
       view: 'home',
       user: { signedIn: false, firstName: '', lastName: '', mobile: '', email: '' },
       authStep: 'email', emailInput: '', otpInput: '', authErr: '', devCode: '',
     });
+    setTimeout(() => { signingOutRef.current = false; }, 1500);
     window.scrollTo({ top: 0 });
   };
+
+  // "Remember me" toggle on the sign-in step. We persist the choice immediately
+  // (so it's set before verify) and mirror it in state for the checkbox.
+  const onToggleRemember = (checked) => { setRemember(checked); onState({ remember: checked }); };
 
   const navServices = () => {
     onState({ view: 'home' });
@@ -276,6 +387,9 @@ export default function App() {
     if(!code) return;
     const addr = email.trim();
     onState({ authBusy: true, authErr: '' });
+    // Lock in the Remember-me choice before verify writes the session, so it
+    // lands in the right store (local = persistent, session = until tab closes).
+    setRemember(state.remember);
     // DEV fallback path: Supabase email was down, so we verify against the
     // locally-generated code instead of calling Supabase.
     if(state.devCode){
@@ -300,18 +414,24 @@ export default function App() {
     // auto-fills first/last name + mobile in the details step.
     let saved = null;
     try { saved = await fetchUser(addr); } catch { /* table missing / offline — just don't prefill */ }
+    // Stamp login_timestamp = now. This (re)starts the absolute 24h clock and is
+    // the only write to it, so refreshes / token refreshes never reset it.
+    try { await touchLogin(addr); } catch (e) { console.error('touchLogin failed', e); }
+    const nextUser = {
+      ...state.user,
+      signedIn: true,
+      email: addr,
+      firstName: saved ? saved.firstName : state.user.firstName,
+      lastName: saved ? saved.lastName : state.user.lastName,
+      mobile: saved ? saved.mobile : state.user.mobile,
+    };
+    // The Supabase session is already created by verifyOtp (or, in the dev
+    // fallback, there's no server session — that path is dev-only).
     onState(st => ({
       authBusy: false,
       otpInput: '',
       devCode: '',
-      user: {
-        ...st.user,
-        signedIn: true,
-        email: addr,
-        firstName: saved ? saved.firstName : st.user.firstName,
-        lastName: saved ? saved.lastName : st.user.lastName,
-        mobile: saved ? saved.mobile : st.user.mobile,
-      },
+      user: { ...st.user, ...nextUser },
       step: 'details',
     }));
     window.scrollTo({ top: 0 });
@@ -361,11 +481,11 @@ export default function App() {
       )}
 
       {state.view === 'book' && (
-        <BookingView state={state} goHome={goHome} goAccount={goAccount} goBook={goBook} onState={onState} onCreateBooking={onCreateBooking} onUpdateBooking={onUpdateBooking} onSendOtp={onSendOtp} onVerifyOtp={onVerifyOtp} onSaveProfile={onSaveProfile} />
+        <BookingView state={state} goHome={goHome} goAccount={goAccount} goBook={goBook} onState={onState} onCreateBooking={onCreateBooking} onUpdateBooking={onUpdateBooking} onSendOtp={onSendOtp} onVerifyOtp={onVerifyOtp} onSaveProfile={onSaveProfile} onToggleRemember={onToggleRemember} />
       )}
 
       {state.view === 'account' && (
-        <AccountView bookings={state.bookings} user={state.user} goBook={goBook} onState={onState} onUpdateBooking={onUpdateBooking} showAlert={showAlert} />
+        <AccountView state={state} bookings={state.bookings} user={state.user} goBook={goBook} onState={onState} onUpdateBooking={onUpdateBooking} showAlert={showAlert} onSendOtp={onSendOtp} onVerifyOtp={onVerifyOtp} onToggleRemember={onToggleRemember} />
       )}
 
       {state.view === 'profile' && (

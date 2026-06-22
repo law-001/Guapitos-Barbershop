@@ -21,3 +21,17 @@ export async function verifyEmailOtp(email, token) {
 export async function signOut() {
   return supabase.auth.signOut()
 }
+
+// Current server-side session (null when signed out / expired). Supabase reads
+// it from storage and auto-refreshes it; we just mirror its signed-in state.
+export async function getSession() {
+  const { data } = await supabase.auth.getSession()
+  return data.session ?? null
+}
+
+// Subscribe to auth changes (sign-in, token refresh, expiry, sign-out). The
+// callback gets the new session or null. Returns an unsubscribe function.
+export function onAuthChange(cb) {
+  const { data } = supabase.auth.onAuthStateChange((_event, session) => cb(session ?? null))
+  return () => data.subscription?.unsubscribe()
+}

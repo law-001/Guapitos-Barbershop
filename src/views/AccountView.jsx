@@ -1,10 +1,69 @@
 import { barberById, timeLabel, statusMeta, nowMs } from '../helpers';
 
-export default function AccountView({ bookings, user, goBook, onState, onUpdateBooking, showAlert }) {
+export default function AccountView({ state, bookings, user, goBook, onState, onUpdateBooking, showAlert, onSendOtp, onVerifyOtp, onToggleRemember }) {
   const accent = '#D6C3A0';
   const nowAbs = nowMs();
   const startMs = b => new Date(b.date+'T00:00:00').getTime()+b.start*60000;
-  const mine = bookings.filter(b=>b.mine);
+
+  // Viewing appointments requires being signed in (= a verified email). When
+  // signed out we show the same email-OTP flow used in the booking step; once
+  // verified, this view re-renders with the user's own appointments.
+  if (!user.signedIn) {
+    const s = state;
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s.emailInput||'').trim());
+    return (
+      <main style={{maxWidth:'460px',margin:'0 auto',padding:'clamp(40px,8vw,90px) clamp(16px,4vw,32px) 80px',animation:'gbfade 0.4s ease both'}}>
+        <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:accent,marginBottom:'10px'}}>My appointments</div>
+        <h1 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(28px,5vw,44px)',margin:'0 0 6px',lineHeight:'1'}}>Sign in to view</h1>
+        <p style={{color:'#9A9388',margin:'0 0 26px'}}>Verify your email to see and manage your bookings. We'll send a one-time code.</p>
+        {s.authStep==='email' && (
+          <>
+            <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Enter Email Address</label>
+            <input type="email" value={s.emailInput}
+              onChange={e=>onState({emailInput:e.target.value,authErr:''})}
+              onKeyDown={e=>{ if(e.key==='Enter' && emailOk && !s.authBusy) onSendOtp(s.emailInput); }}
+              placeholder="you@email.com" autoComplete="email"
+              style={{width:'100%',boxSizing:'border-box',background:'#1D1A15',border:`1px solid ${s.authErr?'#C2553B':'#2A2622'}`,borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'16px',marginBottom:'12px'}}/>
+            {s.authErr && <p style={{color:'#E08A6E',fontSize:'13px',margin:'0 0 12px'}}>{s.authErr}</p>}
+            <label style={{display:'flex',alignItems:'center',gap:'9px',cursor:'pointer',userSelect:'none',fontSize:'14px',color:'#9A9388',margin:'0 0 14px'}}>
+              <input type="checkbox" checked={s.remember} onChange={e=>onToggleRemember(e.target.checked)}
+                style={{width:'17px',height:'17px',accentColor:accent,cursor:'pointer'}}/>
+              Keep me signed in on this device
+            </label>
+            <button onClick={()=>onSendOtp(s.emailInput)} disabled={!emailOk || s.authBusy}
+              style={{width:'100%',cursor:(!emailOk||s.authBusy)?'not-allowed':'pointer',opacity:(!emailOk||s.authBusy)?0.55:1,background:accent,color:'#0E0E0E',border:'none',borderRadius:'10px',padding:'14px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px'}}>{s.authBusy?'Sending…':'Send code'}</button>
+          </>
+        )}
+        {s.authStep==='otp' && (
+          <>
+            <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Enter the 8-digit code sent to {s.emailInput||'your email'}</label>
+            {s.devCode && (
+              <div style={{background:'rgba(214,195,160,0.1)',border:'1px dashed '+accent,borderRadius:'10px',padding:'10px 12px',marginBottom:'12px',fontSize:'13px',color:'#9A9388'}}>
+                Email service is down — <b style={{color:accent}}>dev mode</b>. Use code <b style={{color:accent,letterSpacing:'0.15em'}}>{s.devCode}</b>
+              </div>
+            )}
+            <input type="text" inputMode="numeric" value={s.otpInput}
+              onChange={e=>onState({otpInput:e.target.value.replace(/\D/g,'').slice(0,8),authErr:''})}
+              onKeyDown={e=>{ if(e.key==='Enter' && s.otpInput.length===8 && !s.authBusy) onVerifyOtp(s.emailInput,s.otpInput); }}
+              placeholder="• • • • • • • •"
+              style={{width:'100%',boxSizing:'border-box',background:'#1D1A15',border:`1px solid ${s.authErr?'#C2553B':'#2A2622'}`,borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'24px',letterSpacing:'0.4em',textAlign:'center',marginBottom:'12px'}}/>
+            {s.authErr && <p style={{color:'#E08A6E',fontSize:'13px',margin:'0 0 12px'}}>{s.authErr}</p>}
+            <button onClick={()=>onVerifyOtp(s.emailInput,s.otpInput)} disabled={s.otpInput.length!==8 || s.authBusy}
+              style={{width:'100%',cursor:(s.otpInput.length!==8||s.authBusy)?'not-allowed':'pointer',opacity:(s.otpInput.length!==8||s.authBusy)?0.55:1,background:accent,color:'#0E0E0E',border:'none',borderRadius:'10px',padding:'14px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px'}}>{s.authBusy?'Verifying…':'Verify & view'}</button>
+            <div style={{display:'flex',gap:'8px',marginTop:'4px'}}>
+              <button onClick={()=>onState({authStep:'email',otpInput:'',authErr:''})}
+                style={{flex:'1',cursor:'pointer',background:'transparent',color:'#9A9388',border:'none',padding:'12px',fontSize:'14px'}}>← Change email</button>
+              <button onClick={()=>onSendOtp(s.emailInput)} disabled={s.authBusy}
+                style={{flex:'1',cursor:s.authBusy?'not-allowed':'pointer',background:'transparent',color:'#9A9388',border:'none',padding:'12px',fontSize:'14px'}}>Resend code</button>
+            </div>
+          </>
+        )}
+      </main>
+    );
+  }
+
+  // Signed in — show only THIS customer's bookings (scoped by verified email).
+  const mine = bookings.filter(b=>b.email && b.email===user.email);
   const upcoming = mine.filter(b=>b.status!=='cancelled'&&b.status!=='completed'&&startMs(b)>=nowAbs).sort((a,b)=>startMs(a)-startMs(b));
   const past = mine.filter(b=>b.status==='completed'||b.status==='cancelled'||startMs(b)<nowAbs).sort((a,b)=>startMs(b)-startMs(a));
   const cutoff = 2*3600000;

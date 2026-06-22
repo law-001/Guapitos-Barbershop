@@ -1,7 +1,7 @@
 import { SERVICES, CATS, BARBERS } from '../data';
 import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, addDays, genId } from '../helpers';
 
-export default function BookingView({ state, goHome, goAccount, goBook, onState, onCreateBooking, onUpdateBooking, onSendOtp, onVerifyOtp, onSaveProfile, leadHours=1, onlinePayEnabled=true }) {
+export default function BookingView({ state, goHome, goAccount, goBook, onState, onCreateBooking, onUpdateBooking, onSendOtp, onVerifyOtp, onSaveProfile, onToggleRemember, leadHours=1, onlinePayEnabled=true }) {
   const s = state;
   const accent='#D6C3A0', hair='#2A2622';
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.emailInput.trim());
@@ -64,7 +64,7 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     const assigned = s.barber==='any' ? firstFreeLocal(s.date,s.time,dur,null) : s.barber;
     const ref='GB-'+Math.random().toString(36).slice(2,7).toUpperCase();
     const names=s.cart.map(id=>svcById(id).name);
-    const bk={id:genId('u'),date:s.date,start:s.time,dur,barber:assigned,service:names.join(' + '),price:totalPrice(),customer:fullName||'You',status:'booked',mine:true,pay:s.payMethod,notes:s.notes,followUp:false};
+    const bk={id:genId('u'),date:s.date,start:s.time,dur,barber:assigned,service:names.join(' + '),price:totalPrice(),customer:fullName||'You',email:s.user.email||'',status:'booked',mine:true,pay:s.payMethod,notes:s.notes,followUp:false};
     onCreateBooking(bk);
     onState({lastRef:ref,lastBooking:bk,step:'confirmation'});
     window.scrollTo({top:0});
@@ -210,6 +210,11 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
                   placeholder="you@email.com" autoComplete="email"
                   style={{width:'100%',boxSizing:'border-box',background:'#1D1A15',border:`1px solid ${s.authErr?'#C2553B':'#2A2622'}`,borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'16px',marginBottom:'12px'}}/>
                 {s.authErr && <p style={{color:'#E08A6E',fontSize:'13px',margin:'0 0 12px'}}>{s.authErr}</p>}
+                <label style={{display:'flex',alignItems:'center',gap:'9px',cursor:'pointer',userSelect:'none',fontSize:'14px',color:'#9A9388',margin:'0 0 14px'}}>
+                  <input type="checkbox" checked={s.remember} onChange={e=>onToggleRemember(e.target.checked)}
+                    style={{width:'17px',height:'17px',accentColor:accent,cursor:'pointer'}}/>
+                  Keep me signed in on this device
+                </label>
                 <button onClick={()=>onSendOtp(s.emailInput)} disabled={!emailOk || s.authBusy}
                   style={{width:'100%',cursor:(!emailOk||s.authBusy)?'not-allowed':'pointer',opacity:(!emailOk||s.authBusy)?0.55:1,background:accent,color:'#0E0E0E',border:'none',borderRadius:'10px',padding:'14px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px'}}>{s.authBusy?'Sending…':'Send code'}</button>
               </>
