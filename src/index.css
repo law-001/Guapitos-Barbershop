@@ -36,6 +36,12 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes gbtoast {
+  0% { opacity: 0; transform: translateY(8px); }
+  12% { opacity: 1; transform: none; }
+  75% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(8px); }
+}
 
 input, select, textarea, button {
   font-family: 'Hanken Grotesk', system-ui, sans-serif;

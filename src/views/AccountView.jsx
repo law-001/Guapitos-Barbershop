@@ -1,9 +1,8 @@
-import { barberById, timeLabel, statusMeta, iso, todayDate } from '../helpers';
+import { barberById, timeLabel, statusMeta, nowMs } from '../helpers';
 
-export default function AccountView({ bookings, user, goBook, onState }) {
+export default function AccountView({ bookings, user, goBook, onState, onUpdateBooking, showAlert }) {
   const accent = '#D6C3A0';
-  const hair = '#2A2622';
-  const nowAbs = Date.now();
+  const nowAbs = nowMs();
   const startMs = b => new Date(b.date+'T00:00:00').getTime()+b.start*60000;
   const mine = bookings.filter(b=>b.mine);
   const upcoming = mine.filter(b=>b.status!=='cancelled'&&b.status!=='completed'&&startMs(b)>=nowAbs).sort((a,b)=>startMs(a)-startMs(b));
@@ -11,8 +10,8 @@ export default function AccountView({ bookings, user, goBook, onState }) {
   const cutoff = 2*3600000;
 
   const cancelBooking = (b) => {
-    if(startMs(b)-nowAbs < cutoff){ alert("Sorry — bookings can't be changed within 2 hours of the appointment. Please call the shop."); return; }
-    onState(s=>({bookings:s.bookings.map(x=>x.id===b.id?{...x,status:'cancelled'}:x)}));
+    if(startMs(b)-nowAbs < cutoff){ showAlert("Sorry — bookings can't be changed within 2 hours of the appointment. Please call the shop.", {title:'Too close to appointment'}); return; }
+    onUpdateBooking(b.id,{status:'cancelled'});
   };
   const startReschedule = (b) => {
     onState({view:'book',step:'datetime',reschedulingId:b.id,barber:b.barber,date:null,time:null,cart:[]});

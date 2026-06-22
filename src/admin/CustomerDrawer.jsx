@@ -1,10 +1,9 @@
 import { PHONES } from '../data';
-import { barberById, statusMeta, tint, timeLabel, durLabel, peso } from '../helpers';
+import { barberById, statusMeta, peso } from '../helpers';
 
 export default function CustomerDrawer({ bookings, custName, closeCust, openDrawer }) {
   if(!custName) return null;
   const accent = '#D6C3A0';
-  const hair = '#2A2622';
 
   const cb = bookings.filter(b=>b.customer===custName).sort((a,b)=>{
     const ta=new Date(a.date+'T00:00:00').getTime()+a.start*60000;
@@ -33,7 +32,7 @@ export default function CustomerDrawer({ bookings, custName, closeCust, openDraw
             <span style={{flexShrink:'0',width:'56px',height:'56px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'Oswald'",fontWeight:'700',fontSize:'20px',color:accent,background:'#1D1A15',border:'1px solid #2A2622'}}>{initials}</span>
             <div style={{flex:'1',minWidth:'0'}}>
               <div style={{fontFamily:"'Oswald'",fontSize:'23px',lineHeight:'1.1'}}>{custName}</div>
-              <div style={{fontSize:'13.5px',color:'#9A9388'}}>{PHONES[custName]||'0917 000 0000'}</div>
+              <div style={{fontSize:'13.5px',color:'#9A9388'}}>{PHONES[custName]||'No number'}</div>
             </div>
           </div>
 
