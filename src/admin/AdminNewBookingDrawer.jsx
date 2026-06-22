@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { SERVICES, CATS, BARBERS, OPEN, CLOSE } from '../data';
-import { iso, todayDate, addDays, timeLabel, durLabel, peso, svcById, barberById, slotFree, firstFree, nowMin } from '../helpers';
+import { iso, todayDate, addDays, timeLabel, durLabel, peso, svcById, barberById, slotFree, firstFree, nowMin, genId } from '../helpers';
 
-export default function AdminNewBookingDrawer({ bookings, onClose, onConfirm, defaultIso }) {
+export default function AdminNewBookingDrawer({ bookings, onClose, onConfirm }) {
   const accent = '#D6C3A0';
   const hair = '#2A2622';
   const surf = '#15130F';
@@ -11,7 +11,7 @@ export default function AdminNewBookingDrawer({ bookings, onClose, onConfirm, de
 
   const [cart, setCart] = useState([]);
   const [barber, setBarber] = useState('any');
-  const [date, setDate] = useState(defaultIso || null);
+  const [date, setDate] = useState(iso(todayDate()));
   const [time, setTime] = useState(null);
   const [customer, setCustomer] = useState('');
   const [notes, setNotes] = useState('');
@@ -50,7 +50,7 @@ export default function AdminNewBookingDrawer({ bookings, onClose, onConfirm, de
     const assigned = barber === 'any' ? firstFree(bookings, date, time, dur) : barber;
     const names = cart.map(id => svcById(id).name);
     const bk = {
-      id: 'a' + Date.now(),
+      id: genId('a'),
       date,
       start: time,
       dur,
@@ -58,7 +58,7 @@ export default function AdminNewBookingDrawer({ bookings, onClose, onConfirm, de
       service: names.join(' + '),
       price: totalPrice,
       customer: customer.trim() || 'Walk-in',
-      status: 'confirmed',
+      status: 'booked',
       mine: false,
       pay: payMethod,
       notes,

@@ -1,19 +1,7 @@
-import { useState, useEffect } from 'react';
 import { BARBERS, OPEN, CLOSE } from '../data';
-import { iso, todayDate, addDays, timeLabel, statusMeta, barberById, tint, nowMin, durLabel } from '../helpers';
-
-function useIsMobile() {
-  const [m, setM] = useState(window.innerWidth <= 768);
-  useEffect(() => {
-    const h = () => setM(window.innerWidth <= 768);
-    window.addEventListener('resize', h);
-    return () => window.removeEventListener('resize', h);
-  }, []);
-  return m;
-}
+import { iso, todayDate, timeLabel, statusMeta, barberById, tint, nowMin, durLabel } from '../helpers';
 
 export default function CalendarPage({ bookings, calMode, calIso, setCalMode, calShift, calToday, selectCalDay, openDayFromMonth, openDrawer, adminNewAppt, adminQuickAdd }) {
-  const isMobile = useIsMobile();
   const accent = '#D6C3A0';
   const hair = '#2A2622';
   const todayIso = iso(todayDate());
@@ -35,7 +23,7 @@ export default function CalendarPage({ bookings, calMode, calIso, setCalMode, ca
       numColor:closed?'#6b5f50':(inMonth?'#F4EFE7':'#5e574d'),
       border:sel?accent:hair,todayDot:di===todayIso});
   }
-  const monthLabel = calDate.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+  const monthLabel = calDate.toLocaleDateString('en-US',{month:'long'});
 
   // Week cols
   const weekStart = new Date(calDate); weekStart.setDate(calDate.getDate()-calDate.getDay());
@@ -61,7 +49,8 @@ export default function CalendarPage({ bookings, calMode, calIso, setCalMode, ca
   });
   const nowAbsM = nowMin(); const gridNowShow = calIso===todayIso&&nowAbsM>=OPEN&&nowAbsM<=CLOSE;
   const gridNowTop = Math.round((nowAbsM-OPEN)*PXMIN);
-  const dayLabel = calDate.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+  const dayLabel = calDate.toLocaleDateString('en-US',{weekday:'long'});
+  const todayBtnLabel = (calIso===todayIso?'Today • ':'') + calDate.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
   const calRangeLabel = calMode==='month'?monthLabel:(calMode==='week'?weekLabel:dayLabel);
 
   // Side panel
@@ -106,7 +95,7 @@ export default function CalendarPage({ bookings, calMode, calIso, setCalMode, ca
         </div>
         <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
           <button onClick={()=>calShift(-1)} style={{cursor:'pointer',background:'#15130F',border:'1px solid #2A2622',color:'#F4EFE7',borderRadius:'8px',width:'36px',height:'36px',fontSize:'18px'}}>‹</button>
-          <button onClick={calToday} style={{cursor:'pointer',background:'#15130F',border:'1px solid #2A2622',color:'#F4EFE7',borderRadius:'8px',padding:'0 14px',height:'36px',fontSize:'13px',fontWeight:'600'}}>Today</button>
+          <button onClick={calToday} style={{cursor:'pointer',background:'#15130F',border:'1px solid #2A2622',color:'#F4EFE7',borderRadius:'8px',padding:'0 14px',height:'36px',fontSize:'13px',fontWeight:'600',whiteSpace:'nowrap'}}>{todayBtnLabel}</button>
           <button onClick={()=>calShift(1)} style={{cursor:'pointer',background:'#15130F',border:'1px solid #2A2622',color:'#F4EFE7',borderRadius:'8px',width:'36px',height:'36px',fontSize:'18px'}}>›</button>
         </div>
         <div style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.03em',fontSize:'18px',color:'#F4EFE7'}}>{calRangeLabel}</div>

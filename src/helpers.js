@@ -17,6 +17,13 @@ export const nowMin = () => {
   return Math.floor((Date.now()-t.getTime())/60000);
 };
 
+// Current epoch ms — kept here (plain module fn) so component bodies stay pure.
+export const nowMs = () => Date.now();
+
+// Unique id generator for client-created bookings.
+let _idSeq = 0;
+export const genId = (prefix='') => prefix + Date.now().toString(36) + (++_idSeq).toString(36);
+
 export const durLabel = m => {
   const h=Math.floor(m/60), mm=m%60;
   let s='';
@@ -48,14 +55,20 @@ export const tint = (hex, a) => {
   return 'rgba('+r+','+g+','+b+','+a+')';
 };
 
+// Appointment statuses still "live" (not finished/voided). Used for upcoming
+// counts, the next-up card, and the auto no-show grace (only 'booked' qualifies).
+export const isLive = st => st==='booked' || st==='checked-in' || st==='in-progress';
+
 export const statusMeta = st => {
   const m={
-    confirmed:{label:'Confirmed',color:'#D6C3A0'},
-    completed:{label:'Done',color:'#6FA886'},
-    'no-show':{label:'No-show',color:'#C46A5A'},
-    cancelled:{label:'Cancelled',color:'#6b645b'}
+    booked:{label:'Booked',color:'#6E97C9'},          // blue
+    'checked-in':{label:'Checked In',color:'#6FA886'}, // green
+    'in-progress':{label:'In Progress',color:'#E0913F'},// orange
+    completed:{label:'Completed',color:'#8A8378'},     // gray
+    cancelled:{label:'Cancelled',color:'#C46A5A'},     // red
+    'no-show':{label:'No Show',color:'#8B2F22'}        // dark red
   };
-  return m[st]||m.confirmed;
+  return m[st]||m.booked;
 };
 
 export const ticketOf = (bookings, id) => {

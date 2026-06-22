@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { BARBERS, OPEN, CLOSE } from '../data';
-import { iso, todayDate, dateFull, nowMin, slotFree } from '../helpers';
+import { BARBERS } from '../data';
+import { iso, todayDate, dateFull } from '../helpers';
 import DashboardPage from './DashboardPage';
 import CalendarPage from './CalendarPage';
 import RecordsPage from './RecordsPage';
@@ -9,14 +9,13 @@ import BookingDrawer from './BookingDrawer';
 import CustomerDrawer from './CustomerDrawer';
 import AdminNewBookingDrawer from './AdminNewBookingDrawer';
 
-export default function AdminShell({ state, onState, goHome }) {
+export default function AdminShell({ state, onState, onCreateBooking, onUpdateBooking, onCheckIn, showConfirm }) {
   const s = state;
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   const onStateRef = useRef(onState);
   useEffect(() => { onStateRef.current = onState; });
   const accent = '#D6C3A0';
-  const hair = '#2A2622';
 
   const navOpen = s.adminNavOpen;
   const page = s.adminPage;
@@ -37,20 +36,24 @@ export default function AdminShell({ state, onState, goHome }) {
   const navCol = p => page===p ? accent : '#9A9388';
   const setPage = p => { onState({adminPage:p,drawerId:null,custName:null,...(isMobile?{adminNavOpen:false}:{})}); window.scrollTo({top:0}); };
 
-  const openDrawer = id => onState({drawerId:id,custName:null});
+  const openDrawer = id => onState({drawerId:id,custName:null,drawerEdit:false});
   const closeDrawer = () => onState({drawerId:null});
   const openCust = name => onState({custName:name,drawerId:null});
   const closeCust = () => onState({custName:null});
 
-  const setBookingStatus = (id, st) => onState(s=>({bookings:s.bookings.map(b=>b.id===id?{...b,status:st}:b)}));
-  const toggleFollowUp = id => onState(s=>({bookings:s.bookings.map(b=>b.id===id?{...b,followUp:!b.followUp}:b)}));
+  const setBookingStatus = (id, st) => onUpdateBooking(id, { status: st });
+  const toggleFollowUp = id => {
+    const cur = s.bookings.find(b=>b.id===id);
+    onUpdateBooking(id, { followUp: !(cur && cur.followUp) });
+  };
 
   const adminQuickAdd = () => setNewBookingOpen(true);
 
   const adminNewAppt = () => setNewBookingOpen(true);
 
   const handleNewBookingConfirm = (bk) => {
-    onState(st => ({ bookings: [...st.bookings, bk], drawerId: bk.id }));
+    onCreateBooking(bk);
+    onState({ drawerId: bk.id, drawerEdit: false });
     setNewBookingOpen(false);
   };
 
@@ -168,7 +171,7 @@ export default function AdminShell({ state, onState, goHome }) {
 
         <div style={{padding:'clamp(18px,2.6vw,30px) clamp(16px,3vw,32px) 60px',animation:'gbfade 0.35s ease both'}}>
           {page==='dashboard' && (
-            <DashboardPage bookings={s.bookings} openDrawer={openDrawer} navCalendar={()=>setPage('calendar')}/>
+            <DashboardPage bookings={s.bookings} openDrawer={openDrawer} navCalendar={()=>setPage('calendar')} onCheckIn={onCheckIn} onUpdateBooking={onUpdateBooking}/>
           )}
           {page==='calendar' && (
             <CalendarPage
@@ -196,7 +199,7 @@ export default function AdminShell({ state, onState, goHome }) {
 
       {/* DRAWERS */}
       {s.drawerId && (
-        <BookingDrawer bookings={s.bookings} drawerId={s.drawerId} closeDrawer={closeDrawer} setBookingStatus={setBookingStatus} toggleFollowUp={toggleFollowUp} user={s.user}/>
+        <BookingDrawer bookings={s.bookings} drawerId={s.drawerId} closeDrawer={closeDrawer} setBookingStatus={setBookingStatus} toggleFollowUp={toggleFollowUp} onUpdateBooking={onUpdateBooking} onCheckIn={onCheckIn} user={s.user} showConfirm={showConfirm} startEdit={s.drawerEdit} openEditN={s.openEditN}/>
       )}
       {s.custName && (
         <CustomerDrawer bookings={s.bookings} custName={s.custName} closeCust={closeCust} openDrawer={openDrawer}/>
@@ -204,7 +207,6 @@ export default function AdminShell({ state, onState, goHome }) {
       {newBookingOpen && (
         <AdminNewBookingDrawer
           bookings={s.bookings}
-          defaultIso={s.calIso}
           onClose={()=>setNewBookingOpen(false)}
           onConfirm={handleNewBookingConfirm}
         />

@@ -1,0 +1,4 @@
+-- Seed snapshot: public.users
+-- No seed users. The demo customers were dummy data and were removed in
+-- supabase/migrations/0004_clear_dummy_data.sql. Real customers are created
+-- through the app. Add seed rows here only if you want starter customers.

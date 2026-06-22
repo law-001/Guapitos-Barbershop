@@ -1,9 +1,10 @@
 import { SERVICES, CATS, BARBERS } from '../data';
-import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, todayDate, addDays } from '../helpers';
+import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, addDays, genId } from '../helpers';
 
-export default function BookingView({ state, goHome, goAccount, goBook, onState, leadHours=1, cancelCutoffHours=2, onlinePayEnabled=true }) {
+export default function BookingView({ state, goHome, goAccount, goBook, onState, onCreateBooking, onUpdateBooking, onSendOtp, onVerifyOtp, leadHours=1, onlinePayEnabled=true }) {
   const s = state;
   const accent='#D6C3A0', hair='#2A2622';
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.emailInput.trim());
 
   const navOrder = () => {
     const o=['service','barber','datetime'];
@@ -61,8 +62,9 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     const assigned = s.barber==='any' ? firstFreeLocal(s.date,s.time,dur,null) : s.barber;
     const ref='GB-'+Math.random().toString(36).slice(2,7).toUpperCase();
     const names=s.cart.map(id=>svcById(id).name);
-    const bk={id:'u'+Date.now(),date:s.date,start:s.time,dur,barber:assigned,service:names.join(' + '),price:totalPrice(),customer:s.user.name||'You',status:'confirmed',mine:true,pay:s.payMethod,notes:s.notes,followUp:false};
-    onState(st=>({bookings:[...st.bookings,bk],lastRef:ref,lastBooking:bk,step:'confirmation'}));
+    const bk={id:genId('u'),date:s.date,start:s.time,dur,barber:assigned,service:names.join(' + '),price:totalPrice(),customer:s.user.name||'You',status:'booked',mine:true,pay:s.payMethod,notes:s.notes,followUp:false};
+    onCreateBooking(bk);
+    onState({lastRef:ref,lastBooking:bk,step:'confirmation'});
     window.scrollTo({top:0});
   };
 
@@ -70,16 +72,13 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     const id=s.reschedulingId; const dur=totalDur();
     const assigned = s.barber==='any' ? firstFreeLocal(s.date,s.time,dur,id) : s.barber;
     const ref='GB-'+Math.random().toString(36).slice(2,7).toUpperCase();
-    onState(st=>{
-      const bookings=st.bookings.map(b=>b.id===id?{...b,date:s.date,start:s.time,barber:assigned,status:'confirmed'}:b);
-      const updated=bookings.find(b=>b.id===id);
-      return {bookings,reschedulingId:null,lastRef:ref,lastBooking:updated,step:'confirmation'};
-    });
+    const patch={date:s.date,start:s.time,barber:assigned,status:'booked'};
+    onUpdateBooking(id,patch);
+    const updated={...s.bookings.find(b=>b.id===id),...patch};
+    onState({reschedulingId:null,lastRef:ref,lastBooking:updated,step:'confirmation'});
     window.scrollTo({top:0});
   };
 
-  const today = todayDate();
-  const todayIso = iso(today);
   const slots = genSlots(s.bookings, s.date, s.barber, totalDur(), leadHours, s.reschedulingId);
 
   const cont = {service:'Continue',barber:'Continue',datetime:s.reschedulingId?'Confirm new time':'Continue',signin:'Continue',details:'Continue',
@@ -200,34 +199,36 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
           <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(26px,4vw,40px)',margin:'0 0 6px'}}>Sign in to confirm</h2>
           <p style={{color:'#9A9388',margin:'0 0 26px'}}>We keep your bookings and barber preference here. Takes a few seconds.</p>
           <div style={{maxWidth:'420px'}}>
-            {s.authStep==='choose' && (
+            {s.authStep==='email' && (
               <>
-                <button onClick={()=>onState(st=>({user:{...st.user,signedIn:true,name:st.user.name||'Diego Ramos',mobile:st.user.mobile||'0917 555 0142'},step:'details'}))}
-                  style={{width:'100%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:'12px',background:'#F4EFE7',color:'#1a1a1a',border:'none',borderRadius:'10px',padding:'15px',fontWeight:'700',fontSize:'16px',marginBottom:'12px'}}>
-                  <span style={{fontFamily:"'Oswald'",fontWeight:'700',fontSize:'18px',color:'#4285F4'}}>G</span> Continue with Google
-                </button>
-                <button onClick={()=>onState({authStep:'phone'})}
-                  style={{width:'100%',cursor:'pointer',background:'#1D1A15',color:'#F4EFE7',border:'1px solid #2A2622',borderRadius:'10px',padding:'15px',fontWeight:'600',fontSize:'16px'}}>Continue with phone (OTP)</button>
-              </>
-            )}
-            {s.authStep==='phone' && (
-              <>
-                <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Mobile number</label>
-                <input type="tel" value={s.phoneInput} onChange={e=>onState({phoneInput:e.target.value})} placeholder="0917 000 0000"
-                  style={{width:'100%',background:'#1D1A15',border:'1px solid #2A2622',borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'16px',marginBottom:'12px'}}/>
-                <button onClick={()=>{ if(s.phoneInput.trim()) onState({authStep:'otp'}); }}
-                  style={{width:'100%',cursor:'pointer',background:accent,color:'#0E0E0E',border:'none',borderRadius:'10px',padding:'14px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px'}}>Send code</button>
+                <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Enter Email Address</label>
+                <input type="email" value={s.emailInput}
+                  onChange={e=>onState({emailInput:e.target.value,authErr:''})}
+                  onKeyDown={e=>{ if(e.key==='Enter' && emailOk && !s.authBusy) onSendOtp(s.emailInput); }}
+                  placeholder="you@email.com" autoComplete="email"
+                  style={{width:'100%',boxSizing:'border-box',background:'#1D1A15',border:`1px solid ${s.authErr?'#C2553B':'#2A2622'}`,borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'16px',marginBottom:'12px'}}/>
+                {s.authErr && <p style={{color:'#E08A6E',fontSize:'13px',margin:'0 0 12px'}}>{s.authErr}</p>}
+                <button onClick={()=>onSendOtp(s.emailInput)} disabled={!emailOk || s.authBusy}
+                  style={{width:'100%',cursor:(!emailOk||s.authBusy)?'not-allowed':'pointer',opacity:(!emailOk||s.authBusy)?0.55:1,background:accent,color:'#0E0E0E',border:'none',borderRadius:'10px',padding:'14px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px'}}>{s.authBusy?'Sending…':'Send code'}</button>
               </>
             )}
             {s.authStep==='otp' && (
               <>
-                <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Enter the 4-digit code sent to {s.phoneInput||'your phone'}</label>
-                <input type="tel" value={s.otpInput} onChange={e=>onState({otpInput:e.target.value})} placeholder="• • • •"
-                  style={{width:'100%',background:'#1D1A15',border:'1px solid #2A2622',borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'24px',letterSpacing:'0.5em',textAlign:'center',marginBottom:'12px'}}/>
-                <button onClick={()=>onState(st=>({user:{...st.user,signedIn:true,mobile:st.phoneInput},step:'details'}))}
-                  style={{width:'100%',cursor:'pointer',background:accent,color:'#0E0E0E',border:'none',borderRadius:'10px',padding:'14px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px'}}>Verify &amp; continue</button>
-                <button onClick={()=>onState({authStep:'phone',otpInput:''})}
-                  style={{width:'100%',cursor:'pointer',background:'transparent',color:'#9A9388',border:'none',padding:'12px',fontSize:'14px'}}>← Use a different number</button>
+                <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Enter the 8-digit code sent to {s.emailInput||'your email'}</label>
+                <input type="text" inputMode="numeric" value={s.otpInput}
+                  onChange={e=>onState({otpInput:e.target.value.replace(/\D/g,'').slice(0,8),authErr:''})}
+                  onKeyDown={e=>{ if(e.key==='Enter' && s.otpInput.length===8 && !s.authBusy) onVerifyOtp(s.emailInput,s.otpInput); }}
+                  placeholder="• • • • • • • •"
+                  style={{width:'100%',boxSizing:'border-box',background:'#1D1A15',border:`1px solid ${s.authErr?'#C2553B':'#2A2622'}`,borderRadius:'10px',padding:'14px',color:'#F4EFE7',fontSize:'24px',letterSpacing:'0.4em',textAlign:'center',marginBottom:'12px'}}/>
+                {s.authErr && <p style={{color:'#E08A6E',fontSize:'13px',margin:'0 0 12px'}}>{s.authErr}</p>}
+                <button onClick={()=>onVerifyOtp(s.emailInput,s.otpInput)} disabled={s.otpInput.length!==8 || s.authBusy}
+                  style={{width:'100%',cursor:(s.otpInput.length!==8||s.authBusy)?'not-allowed':'pointer',opacity:(s.otpInput.length!==8||s.authBusy)?0.55:1,background:accent,color:'#0E0E0E',border:'none',borderRadius:'10px',padding:'14px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px'}}>{s.authBusy?'Verifying…':'Verify & continue'}</button>
+                <div style={{display:'flex',gap:'8px',marginTop:'4px'}}>
+                  <button onClick={()=>onState({authStep:'email',otpInput:'',authErr:''})}
+                    style={{flex:'1',cursor:'pointer',background:'transparent',color:'#9A9388',border:'none',padding:'12px',fontSize:'14px'}}>← Change email</button>
+                  <button onClick={()=>onSendOtp(s.emailInput)} disabled={s.authBusy}
+                    style={{flex:'1',cursor:s.authBusy?'not-allowed':'pointer',background:'transparent',color:'#9A9388',border:'none',padding:'12px',fontSize:'14px'}}>Resend code</button>
+                </div>
               </>
             )}
           </div>

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { PHONES, BARBERS } from '../data';
+import { useState } from 'react';
+import { PHONES } from '../data';
 import { barberById, peso } from '../helpers';
 
 function Pagination({ page, totalPages, totalCount, perPage, setPage, setPerPage, startIdx, endIdx }) {
@@ -63,7 +63,9 @@ export default function CustomersPage({ bookings, openCust }) {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
 
-  useEffect(()=>{ setPage(1); }, [search]);
+  // Reset to page 1 when the search changes (adjust-state-during-render pattern).
+  const [prevSearch, setPrevSearch] = useState(search);
+  if (search !== prevSearch) { setPrevSearch(search); setPage(1); }
 
   const accent = '#D6C3A0';
   const hair = '#2A2622';
@@ -86,7 +88,7 @@ export default function CustomersPage({ bookings, openCust }) {
     const cnt={}; c.bookings.forEach(b=>cnt[b.barber]=(cnt[b.barber]||0)+1);
     const pref=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0];
     const bar=barberById(pref);
-    return {name:c.name,phone:PHONES[c.name]||'0917 000 0000',visits,spent:c.spent,last:c.last,prefName:bar?.name||'—',prefColor:bar?.color||'#9A9388'};
+    return {name:c.name,phone:PHONES[c.name]||'No number',visits,spent:c.spent,last:c.last,prefName:bar?.name||'—',prefColor:bar?.color||'#9A9388'};
   });
 
   const q = search.trim().toLowerCase();

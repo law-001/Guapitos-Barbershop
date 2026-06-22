@@ -1,0 +1,5 @@
+-- Seed snapshot: public.bookings
+-- No seed bookings. The 33 demo rows were dummy data and were removed in
+-- supabase/migrations/0004_clear_dummy_data.sql. Create bookings through the
+-- app (customer flow or admin "new booking"); they persist to this table.
+-- (Historical: the demo rows are still defined in migrations/0002_seed.sql.)

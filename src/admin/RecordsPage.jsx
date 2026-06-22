@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { barberById, statusMeta, tint, ticketOf, timeLabel, peso, iso, todayDate } from '../helpers';
 
 function Pagination({ page, totalPages, totalCount, perPage, setPage, setPerPage, startIdx, endIdx }) {
@@ -66,7 +66,10 @@ export default function RecordsPage({ bookings, openDrawer }) {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
 
-  useEffect(()=>{ setPage(1); }, [search, statusF, barberF, dateFrom, dateTo]);
+  // Reset to page 1 when any filter changes (adjust-state-during-render pattern).
+  const filterKey = [search, statusF, barberF, dateFrom, dateTo].join('|');
+  const [prevKey, setPrevKey] = useState(filterKey);
+  if (filterKey !== prevKey) { setPrevKey(filterKey); setPage(1); }
 
   const accent = '#D6C3A0';
   const hair = '#2A2622';
@@ -120,10 +123,12 @@ export default function RecordsPage({ bookings, openDrawer }) {
           style={{...inputStyle,flex:'1',minWidth:'220px'}}/>
         <select value={statusF} onChange={e=>setStatusF(e.target.value)} style={{...inputStyle,cursor:'pointer'}}>
           <option value="all">All statuses</option>
-          <option value="confirmed">Confirmed</option>
+          <option value="booked">Booked</option>
+          <option value="checked-in">Checked In</option>
+          <option value="in-progress">In Progress</option>
           <option value="completed">Completed</option>
-          <option value="no-show">No-show</option>
           <option value="cancelled">Cancelled</option>
+          <option value="no-show">No Show</option>
         </select>
         <select value={barberF} onChange={e=>setBarberF(e.target.value)} style={{...inputStyle,cursor:'pointer'}}>
           <option value="all">All barbers</option>
