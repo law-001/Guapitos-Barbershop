@@ -5,7 +5,7 @@ import { fetchBookings, insertBooking, updateBooking as apiUpdateBooking } from 
 import { sendEmailOtp, verifyEmailOtp, signOut, getSession, onAuthChange } from './lib/auth';
 import { setRemember } from './lib/supabase';
 import { fetchUser, upsertUser, touchLogin } from './lib/usersApi';
-import { isExpired, isSessionExpired } from './lib/session';
+import { isExpired, isSessionExpired, SESSION_MAX_MS } from './lib/session';
 import HomeView from './views/HomeView';
 import BookingView from './views/BookingView';
 import AccountView from './views/AccountView';
@@ -16,6 +16,28 @@ import Dialog from './Dialog';
 import Toast from './Toast';
 
 const todayIso = iso(todayDate());
+
+// DEBUG: floating countdown to absolute session expiry (loginAt + SESSION_MAX_MS).
+// Ticks every second so we can eyeball that the clock is running. Remove later.
+function SessionTimer({ loginAt }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  if (!loginAt) return null;
+  const expiresAt = new Date(loginAt).getTime() + SESSION_MAX_MS;
+  const left = Math.max(0, expiresAt - now);
+  const h = Math.floor(left / 3600000);
+  const m = Math.floor((left % 3600000) / 60000);
+  const s = Math.floor((left % 60000) / 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    <div style={{ position: 'fixed', right: '12px', bottom: '12px', zIndex: '9999', background: 'rgba(14,14,14,0.9)', border: '1px solid #2A2622', color: left === 0 ? '#ff6b6b' : '#D6C3A0', fontFamily: "'Oswald', monospace", fontSize: '13px', fontWeight: '700', padding: '6px 10px', borderRadius: '8px', letterSpacing: '0.5px', pointerEvents: 'none' }}>
+      {left === 0 ? 'SESSION EXPIRED' : `Session: ${pad(h)}:${pad(m)}:${pad(s)}`}
+    </div>
+  );
+}
 
 // --- Login session (email verification) -------------------------------------
 // Logging in = verifying an email OTP. The session itself is owned by Supabase
@@ -182,6 +204,7 @@ export default function App() {
       onState({ user: {
         signedIn: true, email: addr,
         firstName: saved?.firstName || '', lastName: saved?.lastName || '', mobile: saved?.mobile || '',
+        loginAt: saved?.loginAt || null,
       } });
     }).catch(err => console.error('getSession failed', err));
 
@@ -424,6 +447,7 @@ export default function App() {
       firstName: saved ? saved.firstName : state.user.firstName,
       lastName: saved ? saved.lastName : state.user.lastName,
       mobile: saved ? saved.mobile : state.user.mobile,
+      loginAt: new Date().toISOString(),  // touchLogin just stamped now
     };
     // The Supabase session is already created by verifyOtp (or, in the dev
     // fallback, there's no server session — that path is dev-only).
@@ -466,7 +490,7 @@ export default function App() {
             <button onClick={goProfile} title={`Signed in as ${state.user.email}`}
               style={{ background: 'rgba(214,195,160,0.1)', border: '1px solid #2A2622', color: '#F4EFE7', fontFamily: "'Hanken Grotesk'", fontWeight: '600', fontSize: '14px', cursor: 'pointer', padding: '7px 12px 7px 8px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '9px', maxWidth: '220px' }}>
               <span style={{ flexShrink: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '26px', height: '26px', borderRadius: '50%', background: '#D6C3A0', color: '#0E0E0E', fontFamily: "'Oswald'", fontWeight: '700', fontSize: '14px' }}>{(state.user.firstName || state.user.email).trim().charAt(0).toUpperCase()}</span>
-              <span style={{ minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{state.user.email}</span>
+              <span style={{ minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{state.user.firstName || state.user.email}</span>
             </button>
           ) : (
             <button onClick={goProfile} style={{ background: 'transparent', border: 'none', color: '#9A9388', fontFamily: "'Hanken Grotesk'", fontWeight: '600', fontSize: '14px', cursor: 'pointer', padding: '8px 10px' }}>Profile</button>
@@ -510,6 +534,7 @@ export default function App() {
 
       <Dialog dialog={state.dialog} onClose={closeDialog} />
       <Toast toast={state.toast} nonce={state.toastN} onClose={closeToast} />
+      {state.user.signedIn && <SessionTimer loginAt={state.user.loginAt} />}
     </div>
   );
 }
