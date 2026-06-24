@@ -54,15 +54,33 @@ textarea:focus, select:focus {
   border-color: #D6C3A0 !important;
 }
 
-/* Calendar mobile overrides */
+/* Calendar — swap between desktop and mobile layouts at 768px */
+.cal-day-mobile,
+.cal-week-mobile,
+.cal-month-mobile { display: none; }
+
 @media (max-width: 768px) {
-  .cal-grid-desktop { display: none !important; }
-  .cal-mobile-agenda { display: block !important; }
-  .cal-week-desktop { display: none !important; }
-  .cal-week-mobile { display: flex !important; flex-direction: column !important; gap: 10px !important; overflow-x: visible !important; }
+  .cal-day-desktop,
+  .cal-week-desktop,
+  .cal-grid-desktop,
   .cal-side-panel { display: none !important; }
+  .cal-day-mobile,
+  .cal-week-mobile,
+  .cal-month-mobile { display: block !important; }
+  .cal-desktop-wrap { display: none !important; }
 }
-@media (min-width: 769px) {
-  .cal-mobile-agenda { display: none !important; }
-  .cal-week-mobile { display: none !important; }
+
+/* hide scrollbar on the day-view barber legend chip strip (mobile) */
+.cal-day-mobile > div:first-child::-webkit-scrollbar { display: none; }
+
+/* Top-bar profile chip — hide the username on narrow screens so just the
+   circular avatar remains. Tap the avatar to open the dropdown. */
+@media (max-width: 540px) {
+  .gb-profile-name { display: none !important; }
+}
+
+/* Shrink the Book Now CTA in the top bar on very narrow screens so the
+   profile chip + button fit comfortably. */
+@media (max-width: 540px) {
+  .gb-book-cta { padding: 9px 14px !important; font-size: 13px !important; }
 }

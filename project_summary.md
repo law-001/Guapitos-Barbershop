@@ -81,7 +81,7 @@ UI: `dialog` (Dialog modal), `toast` + `toastN` (bump re-shows same message).
 - **Barber**: `{id, name, spec, initials, color}` — 4 barbers, `'any'` = first free.
 - **Booking**: `{id, date(iso), barber, start(min from midnight), dur, service, price, customer, status, mine, pay, notes, followUp, checkedInAt, createdAt}`.
 - **Status**: `booked | checked-in | in-progress | completed | cancelled | no-show` (see `statusMeta`; `isLive` = booked/checked-in/in-progress).
-- Shop hours: `OPEN 600` (10:00) → `CLOSE 1200` (20:00), minutes from midnight. Slots every 30 min.
+- Shop hours: `OPEN 540` (09:00) → `CLOSE 1140` (19:00), minutes from midnight. Slots every 30 min. Sunday closed.
 
 ## Key logic (helpers.js)
 

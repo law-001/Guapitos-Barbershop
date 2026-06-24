@@ -102,4 +102,4 @@ One `useState` in `App.jsx`, spread-merge updates via `onState`. Customer flow (
 - **Barber**: `{id, name, spec, initials, color}` — `'any'` = first free.
 - **Booking**: `{id, date(iso), barber, start(min from midnight), dur, service, price, customer, status, mine, pay, notes, followUp}`.
 - **Status**: `confirmed | completed | no-show | cancelled`.
-- Shop hours: `OPEN 600` (10:00) → `CLOSE 1200` (20:00), minutes from midnight, 30-min slots.
+- Shop hours: `OPEN 540` (09:00) → `CLOSE 1140` (19:00), minutes from midnight, 30-min slots. Sunday closed.

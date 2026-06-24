@@ -14,6 +14,8 @@ import AdminLogin from './admin/AdminLogin';
 import AdminShell from './admin/AdminShell';
 import Dialog from './Dialog';
 import Toast from './Toast';
+import AuthModal from './AuthModal';
+import ProfileMenu from './ProfileMenu';
 
 const todayIso = iso(todayDate());
 
@@ -83,6 +85,14 @@ const initState = {
   toastN: 0,
   drawerEdit: false,
   openEditN: 0,
+  // Top-bar sign-in modal. Opens when a logged-out visitor clicks Book Now (or
+  // any other entry point that needs auth). `postAuthAction` is a tag the
+  // app reads after successful verification to decide where to send the user:
+  //  - 'book'    → continue into the booking flow (goBook)
+  //  - 'profile' → open the profile view
+  //  - null      → just close
+  authModalOpen: false,
+  postAuthAction: null,
 };
 
 // Auto no-show: a 'booked' appointment that is >10 min past its start time
@@ -289,6 +299,15 @@ export default function App() {
   const goProfile = () => { onState({ view: 'profile' }); window.scrollTo({ top: 0 }); };
   const goAdmin = () => { onState({ view: 'admin' }); window.scrollTo({ top: 0 }); };
 
+  // Gate the top-bar Book Now behind sign-in. If already signed in, jump
+  // straight into the booking flow; otherwise open the AuthModal and queue
+  // 'book' as the post-verification action.
+  const openAuthModal = (postAction = null) =>
+    onState({ authModalOpen: true, postAuthAction: postAction, authStep: 'email', emailInput: '', otpInput: '', authBusy: false, authErr: '', devCode: '' });
+  const closeAuthModal = () =>
+    onState({ authModalOpen: false, postAuthAction: null, authErr: '', authBusy: false });
+  const requireBook = () => { if (state.user.signedIn) goBook(); else openAuthModal('book'); };
+
   // Sign out — clear the Supabase session and reset the local user, back home.
   // Guard so the auth-change subscription doesn't read our own signOut() as an
   // external session loss and tack on an "expired" toast.
@@ -459,6 +478,15 @@ export default function App() {
       step: 'details',
     }));
     window.scrollTo({ top: 0 });
+
+    // If the top-bar AuthModal triggered this sign-in, close it and route the
+    // user wherever the entry point intended (booking flow, profile, etc.).
+    if (state.authModalOpen) {
+      const action = state.postAuthAction;
+      onState({ authModalOpen: false, postAuthAction: null });
+      if (action === 'book') goBook();
+      else if (action === 'profile') goProfile();
+    }
   };
 
   // Persist the customer's details to the DB so the next verification of this
@@ -477,25 +505,21 @@ export default function App() {
 
   return (
     <div style={{ '--bg': '#0E0E0E', '--surf': '#15130F', '--surf2': '#1D1A15', '--tan': '#D6C3A0', '--tan2': '#BFA877', '--cream': '#F4EFE7', '--muted': '#9A9388', '--hair': '#2A2622', background: '#0E0E0E', color: '#F4EFE7', minHeight: '100vh' }}>
-      {/* TOP BAR */}
+      {/* TOP BAR
+          Logged out: logo (left) + Book Now (right). Clicking Book Now opens
+          the AuthModal — booking is gated behind sign-in.
+          Logged in:  logo (left) + ProfileMenu (avatar + dropdown) + Book Now. */}
       {showHeader && (
-        <header style={{ position: 'sticky', top: '0', zIndex: '60', display: 'flex', alignItems: 'center', gap: '16px', height: '64px', padding: '0 clamp(16px,4vw,40px)', background: 'rgba(14,14,14,0.82)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #2A2622' }}>
+        <header style={{ position: 'sticky', top: '0', zIndex: '60', display: 'flex', alignItems: 'center', gap: '12px', height: '64px', padding: '0 clamp(12px,4vw,40px)', background: 'rgba(14,14,14,0.82)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #2A2622' }}>
           <img src="/assets/logo.jpg" alt="Guapito's Barbershop" onClick={goHome} style={{ height: '40px', width: 'auto', cursor: 'pointer', borderRadius: '4px' }} />
           <div style={{ flex: '1' }}></div>
-          <button onClick={goAccount} style={{ background: 'transparent', border: 'none', color: '#F4EFE7', fontFamily: "'Hanken Grotesk'", fontWeight: '600', fontSize: '14px', cursor: 'pointer', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '7px' }}>
-            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#D6C3A0' }}></span>My Appointments
-          </button>
-          {/* Profile tab — shows the signed-in email; a Sign in chip otherwise. */}
-          {state.user.signedIn ? (
-            <button onClick={goProfile} title={`Signed in as ${state.user.email}`}
-              style={{ background: 'rgba(214,195,160,0.1)', border: '1px solid #2A2622', color: '#F4EFE7', fontFamily: "'Hanken Grotesk'", fontWeight: '600', fontSize: '14px', cursor: 'pointer', padding: '7px 12px 7px 8px', borderRadius: '999px', display: 'flex', alignItems: 'center', gap: '9px', maxWidth: '220px' }}>
-              <span style={{ flexShrink: '0', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '26px', height: '26px', borderRadius: '50%', background: '#D6C3A0', color: '#0E0E0E', fontFamily: "'Oswald'", fontWeight: '700', fontSize: '14px' }}>{(state.user.firstName || state.user.email).trim().charAt(0).toUpperCase()}</span>
-              <span style={{ minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{state.user.firstName || state.user.email}</span>
-            </button>
-          ) : (
-            <button onClick={goProfile} style={{ background: 'transparent', border: 'none', color: '#9A9388', fontFamily: "'Hanken Grotesk'", fontWeight: '600', fontSize: '14px', cursor: 'pointer', padding: '8px 10px' }}>Profile</button>
+          {state.user.signedIn && (
+            <ProfileMenu user={state.user} goProfile={goProfile} goAccount={goAccount} onSignOut={onSignOut} />
           )}
-          <button onClick={goBook} style={{ background: '#D6C3A0', color: '#0E0E0E', fontFamily: "'Oswald'", fontWeight: '600', letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '14px', border: 'none', borderRadius: '7px', padding: '11px 20px', cursor: 'pointer' }}>Book Now</button>
+          <button onClick={requireBook} className="gb-book-cta"
+            style={{ background: '#D6C3A0', color: '#0E0E0E', fontFamily: "'Oswald'", fontWeight: '600', letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '14px', border: 'none', borderRadius: '7px', padding: '11px 20px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            Book Now
+          </button>
         </header>
       )}
 
@@ -534,6 +558,8 @@ export default function App() {
 
       <Dialog dialog={state.dialog} onClose={closeDialog} />
       <Toast toast={state.toast} nonce={state.toastN} onClose={closeToast} />
+      <AuthModal state={state} onState={onState} onClose={closeAuthModal}
+        onSendOtp={onSendOtp} onVerifyOtp={onVerifyOtp} onToggleRemember={onToggleRemember} />
       {state.user.signedIn && <SessionTimer loginAt={state.user.loginAt} />}
     </div>
   );

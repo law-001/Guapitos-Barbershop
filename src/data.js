@@ -47,5 +47,5 @@ export const ACTIVITY = [
   {who:'Erik Pena',action:'rescheduled to tomorrow',detail:'Cut & Color · 11:00 AM with Rico Delgado',ago:'5h',color:'#9FB4C2'}
 ];
 
-export const OPEN = 600;
-export const CLOSE = 1200;
+export const OPEN = 540;
+export const CLOSE = 1140;

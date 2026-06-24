@@ -108,7 +108,7 @@ export default function HomeView({ goBook, goAccount, goAdmin, navServices }) {
             <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:'#D6C3A0',marginBottom:'10px'}}>Visit us</div>
             <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(28px,4vw,44px)',margin:'0 0 20px',lineHeight:'1'}}>Hours &amp; location</h2>
             <div style={{display:'flex',flexDirection:'column',gap:'9px',maxWidth:'380px'}}>
-              {[['Monday – Friday','10:00 AM – 8:00 PM'],['Saturday','10:00 AM – 8:00 PM']].map(([d,t])=>(
+              {[['Monday – Friday','9:00 AM – 7:00 PM'],['Saturday','9:00 AM – 7:00 PM']].map(([d,t])=>(
                 <div key={d} style={{display:'flex',justifyContent:'space-between',borderBottom:'1px solid #2A2622',paddingBottom:'9px'}}>
                   <span style={{color:'#9A9388'}}>{d}</span><span style={{fontFamily:"'Oswald'",color:'#F4EFE7'}}>{t}</span>
                 </div>

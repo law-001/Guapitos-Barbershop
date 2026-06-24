@@ -159,7 +159,7 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
       {s.step==='datetime' && (
         <div>
           <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(26px,4vw,40px)',margin:'0 0 6px'}}>Date &amp; time</h2>
-          <p style={{color:'#9A9388',margin:'0 0 22px'}}>{s.reschedulingId?'Pick a new slot — same service length, no extra charge.':'Open Mon–Sat, 10:00 AM – 8:00 PM. Showing only genuinely free slots for your '+durLabel(totalDur()||45)+' booking.'}</p>
+          <p style={{color:'#9A9388',margin:'0 0 22px'}}>{s.reschedulingId?'Pick a new slot — same service length, no extra charge.':'Open Mon–Sat, 9:00 AM – 7:00 PM. Showing only genuinely free slots for your '+durLabel(totalDur()||45)+' booking.'}</p>
           <div style={{display:'flex',gap:'10px',overflowX:'auto',padding:'4px 2px 14px',marginBottom:'8px'}}>
             {Array.from({length:14},(_,i)=>{
               const d=addDays(i); const isoStr=iso(d); const closed=d.getDay()===0; const sel=s.date===isoStr;
