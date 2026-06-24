@@ -95,8 +95,8 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
   );
 
   const sidebarStyle = isMobile
-    ? {width:'232px',flexShrink:'0',position:'fixed',top:'0',left:'0',height:'100vh',display:'flex',flexDirection:'column',background:'#0B0B0B',borderRight:'1px solid #2A2622',transition:'transform 0.22s ease',transform:navOpen?'translateX(0)':'translateX(-100%)',overflow:'hidden',zIndex:'50'}
-    : {width:navOpen?'232px':'72px',flexShrink:'0',position:'sticky',top:'0',height:'100vh',display:'flex',flexDirection:'column',background:'#0B0B0B',borderRight:'1px solid #2A2622',transition:'width 0.18s ease',overflow:'hidden',zIndex:'20'};
+    ? {width:'232px',flexShrink:'0',position:'fixed',top:'0',left:'0',height:'100dvh',maxHeight:'100vh',display:'flex',flexDirection:'column',background:'#0B0B0B',borderRight:'1px solid #2A2622',transition:'transform 0.22s ease',transform:navOpen?'translateX(0)':'translateX(-100%)',overflow:'hidden',zIndex:'50'}
+    : {width:navOpen?'232px':'72px',flexShrink:'0',position:'sticky',top:'0',height:'100dvh',maxHeight:'100vh',display:'flex',flexDirection:'column',background:'#0B0B0B',borderRight:'1px solid #2A2622',transition:'width 0.18s ease',overflow:'hidden',zIndex:'20'};
 
   return (
     <div style={{display:'flex',minHeight:'100vh',background:'#141210'}}>
@@ -108,7 +108,7 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
 
       {/* SIDEBAR */}
       <aside style={sidebarStyle}>
-        <div style={{display:'flex',alignItems:'center',gap:'11px',height:'64px',padding:'0 16px',borderBottom:'1px solid #2A2622'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'11px',height:'64px',flexShrink:'0',padding:'0 16px',borderBottom:'1px solid #2A2622'}}>
           <img src="/assets/logo.jpg" alt="Guapito's" style={{height:'34px',width:'34px',objectFit:'cover',borderRadius:'7px',flexShrink:'0'}}/>
           {showLabel && (
             <div style={{minWidth:'0'}}>
@@ -117,13 +117,13 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
             </div>
           )}
         </div>
-        <nav style={{flex:'1',padding:'14px 12px',display:'flex',flexDirection:'column',gap:'5px'}}>
+        <nav style={{flex:'1',minHeight:'0',overflowY:'auto',padding:'14px 12px',display:'flex',flexDirection:'column',gap:'5px'}}>
           {navBtn('dashboard', icons.dashboard, 'Today')}
           {navBtn('calendar',  icons.calendar,  'Schedule')}
           {navBtn('records',   icons.records,   'Records')}
           {navBtn('customers', icons.customers, 'Customers')}
         </nav>
-        <div style={{padding:'12px',borderTop:'1px solid #2A2622',display:'flex',flexDirection:'column',gap:'6px'}}>
+        <div style={{padding:'12px',flexShrink:'0',borderTop:'1px solid #2A2622',display:'flex',flexDirection:'column',gap:'6px'}}>
           {!isMobile && (
             <button onClick={()=>onState(st=>({adminNavOpen:!st.adminNavOpen}))} title={navOpen?'Collapse':'Expand'}
               style={{display:'flex',alignItems:'center',gap:'13px',cursor:'pointer',background:'transparent',border:'none',borderRadius:'10px',padding:'10px 12px',color:'#9A9388',fontSize:'14px',whiteSpace:'nowrap',width:'100%'}}>
