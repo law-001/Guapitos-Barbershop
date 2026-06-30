@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
-import { iso, todayDate, timeLabel } from './helpers';
+import { iso, todayDate, timeLabel, genId } from './helpers';
 import { fetchBookings, insertBooking, updateBooking as apiUpdateBooking } from './lib/bookingsApi';
-import { sendEmailOtp, verifyEmailOtp, signOut, getSession, onAuthChange } from './lib/auth';
+import { fetchReviews, fetchAllReviews, insertReview, approveReview, deleteReview } from './lib/reviewsApi';
+import { canPostReview, recordReviewPost } from './lib/reviewRateLimit';
+import { fetchStaffByEmail } from './lib/staffApi';
+import { sendEmailOtp, verifyEmailOtp, signInWithPassword, sendPasswordReset, updatePassword, onPasswordRecovery, signOut, getSession, onAuthChange } from './lib/auth';
 import { setRemember } from './lib/supabase';
 import { fetchUser, upsertUser, touchLogin } from './lib/usersApi';
 import { isExpired, isSessionExpired, SESSION_MAX_MS } from './lib/session';
@@ -10,12 +13,15 @@ import HomeView from './views/HomeView';
 import BookingView from './views/BookingView';
 import AccountView from './views/AccountView';
 import ProfileView from './views/ProfileView';
+import ReviewsView from './views/ReviewsView';
 import AdminLogin from './admin/AdminLogin';
 import AdminShell from './admin/AdminShell';
 import Dialog from './Dialog';
 import Toast from './Toast';
 import AuthModal from './AuthModal';
 import ProfileMenu from './ProfileMenu';
+import ReviewModal from './ReviewModal';
+import ResetPasswordModal from './ResetPasswordModal';
 
 const todayIso = iso(todayDate());
 
@@ -70,10 +76,16 @@ const initState = {
   lastBooking: null,
   reschedulingId: null,
   bookings: [],
+  reviews: [],            // public list — approved reviews only
+  adminReviews: [],       // admin moderation list — all reviews incl. pending
+  reviewModalOpen: false,
   adminAuthed: false,
-  adminUser: 'manager',
-  adminPass: 'guapito',
+  adminStaff: null,        // the signed-in staff record (id, name, role, …)
+  adminEmail: '',
+  adminPass: '',
+  adminBusy: false,        // true while a staff auth request is in flight
   adminErr: '',
+  recoveryOpen: false,     // true after a password-reset link is opened
   adminNavOpen: true,
   adminPage: 'dashboard',
   drawerId: null,
@@ -187,6 +199,13 @@ export default function App() {
       .catch(err => console.error('Supabase fetchBookings failed.', err));
   }, []);
 
+  // Load customer reviews once on mount (Reviews page reads from state.reviews).
+  useEffect(() => {
+    fetchReviews()
+      .then(rows => setState(s => ({ ...s, reviews: rows })))
+      .catch(err => console.error('Supabase fetchReviews failed.', err));
+  }, []);
+
   // Re-run the no-show check periodically while the app is open.
   useEffect(() => {
     const t = setInterval(() => sweepRef.current(overdueBooked(bookingsRef.current)), 60000);
@@ -226,6 +245,14 @@ export default function App() {
     return () => { active = false; unsub(); };
   }, []);
 
+  // Password recovery: when the user opens a reset link, Supabase processes the
+  // token in the URL and fires PASSWORD_RECOVERY. Show the "set new password"
+  // modal so they can choose one (saved against the temporary recovery session).
+  useEffect(() => {
+    const unsub = onPasswordRecovery(() => onState({ recoveryOpen: true }));
+    return () => unsub();
+  }, []);
+
   // Re-validate the absolute cutoff periodically while the app stays open, so a
   // tab left running past the window gets signed out without needing a refresh.
   useEffect(() => {
@@ -238,6 +265,31 @@ export default function App() {
   useEffect(() => {
     if (state.view === 'account' || state.view === 'profile') validateRef.current();
   }, [state.view]);
+
+  // Load the full review list (incl. pending) for the admin moderation page once
+  // staff log in.
+  useEffect(() => {
+    if (state.view === 'admin' && state.adminAuthed) {
+      fetchAllReviews()
+        .then(rows => setState(s => ({ ...s, adminReviews: rows })))
+        .catch(err => console.error('Supabase fetchAllReviews failed.', err));
+    }
+  }, [state.view, state.adminAuthed]);
+
+  // Seamless re-entry: if a still-valid Supabase session belongs to an active
+  // staff member, auto-unlock the console when they open the admin view (so a
+  // page refresh doesn't force them to OTP again).
+  useEffect(() => {
+    if (state.view !== 'admin' || state.adminAuthed) return undefined;
+    let active = true;
+    getSession().then(async (session) => {
+      const addr = session?.user?.email;
+      if (!active || !addr) return;
+      const staff = await fetchStaffByEmail(addr);
+      if (active && staff) onState({ adminAuthed: true, adminStaff: staff });
+    }).catch(err => console.error('admin auto-auth failed', err));
+    return () => { active = false; };
+  }, [state.view, state.adminAuthed]);
 
   // Toast notification (see Toast.jsx). `toastN` bumps so the same message re-shows.
   // opts: { linkText, action } — renders a clickable link in the toast.
@@ -297,6 +349,53 @@ export default function App() {
   const goBook = () => { onState({ view: 'book', step: 'service', cart: [], barber: 'any', date: null, time: null, payMethod: null, notes: '', reschedulingId: null, authStep: 'email', emailInput: '', otpInput: '', authBusy: false, authErr: '' }); window.scrollTo({ top: 0 }); };
   const goAccount = () => { onState(s => s.user.signedIn ? { view: 'account' } : { view: 'account', authStep: 'email', emailInput: '', otpInput: '', authBusy: false, authErr: '', devCode: '' }); window.scrollTo({ top: 0 }); };
   const goProfile = () => { onState({ view: 'profile' }); window.scrollTo({ top: 0 }); };
+  const goReviews = () => { onState({ view: 'reviews' }); window.scrollTo({ top: 0 }); };
+
+  // Write-a-review modal: open/close + persist. A submitted review is added to
+  // the top of state.reviews optimistically, then written to Supabase.
+  const openReviewModal = () => onState({ reviewModalOpen: true });
+  const closeReviewModal = () => onState({ reviewModalOpen: false });
+  // Submit a review: rate-limit per device, then persist as PENDING (approved
+  // false) so it stays off the public site until staff approve it. Returns
+  // { ok } so the modal can show an inline error and stay open when blocked.
+  const onSubmitReview = async ({ author, rating, body }) => {
+    const gate = canPostReview();
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const review = { id: genId('r'), author, rating, body, reviewDate: null, relativeTime: 'just now', source: 'website', approved: false };
+    try {
+      await insertReview(review);
+    } catch (err) {
+      console.error('Supabase insertReview failed.', err);
+      return { ok: false, error: "Couldn't post your review. Please try again." };
+    }
+    recordReviewPost();
+    showToast('Thanks! Your review will appear once approved.', 'success');
+    return { ok: true };
+  };
+
+  // Staff approve a pending review: publish it (optimistic) + persist. The
+  // approved row also joins the public list, newest-first.
+  const onApproveReview = (id) => {
+    onState(s => {
+      const r = s.adminReviews.find(x => x.id === id);
+      const adminReviews = s.adminReviews.map(x => x.id === id ? { ...x, approved: true } : x);
+      const reviews = r
+        ? [{ ...r, approved: true }, ...s.reviews.filter(x => x.id !== id)].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+        : s.reviews;
+      return { adminReviews, reviews };
+    });
+    approveReview(id).catch(err => console.error('Supabase approveReview failed.', err));
+    showToast('Review published', 'success');
+  };
+
+  // Staff reject/remove a review (confirm first; deletes the row everywhere).
+  const onRejectReview = (r) => {
+    showConfirm(`Remove ${r.author}'s review? This can't be undone.`, () => {
+      onState(s => ({ adminReviews: s.adminReviews.filter(x => x.id !== r.id), reviews: s.reviews.filter(x => x.id !== r.id) }));
+      deleteReview(r.id).catch(err => console.error('Supabase deleteReview failed.', err));
+      showToast('Review removed', 'danger');
+    }, { title: 'Remove review', confirmText: 'Remove', danger: true });
+  };
   const goAdmin = () => { onState({ view: 'admin' }); window.scrollTo({ top: 0 }); };
 
   // Gate the top-bar Book Now behind sign-in. If already signed in, jump
@@ -335,17 +434,78 @@ export default function App() {
     });
   };
 
-  const adminLogin = () => {
-    const u = state.adminUser.trim().toLowerCase();
-    const p = state.adminPass;
-    if(u === 'manager' && p === 'guapito'){
-      onState({ adminAuthed: true, adminErr: '' });
-      window.scrollTo({ top: 0 });
-    } else if(u && p){
-      onState({ adminErr: "Those credentials don't match. Use the demo login below." });
-    } else {
-      onState({ adminErr: 'Enter a username and password to continue.' });
+  // --- Staff console auth (real Supabase email + password, gated by the staff
+  // table) --- Accounts are created by the owner in the Supabase dashboard; this
+  // signs them in, then confirms the email is an active staff row before
+  // unlocking. A valid login for a non-staff email is rejected (and signed out).
+  const onAdminLogin = async (email, password) => {
+    const addr = (email || '').trim();
+    if (!addr || !password) { onState({ adminErr: 'Enter your email and password.' }); return; }
+    onState({ adminBusy: true, adminErr: '' });
+    setRemember(true);
+    let error;
+    try { ({ error } = await signInWithPassword(addr, password)); }
+    catch (e) { console.error('admin signIn threw', e); onState({ adminBusy: false, adminErr: authMsg(e) }); return; }
+    if (error) {
+      console.error('admin signIn error', error);
+      const msg = /invalid login|invalid credentials/i.test(error.message || '') ? 'Email or password is incorrect.' : authMsg(error);
+      onState({ adminBusy: false, adminErr: msg }); return;
     }
+    const staff = await fetchStaffByEmail(addr);
+    if (!staff) {
+      signingOutRef.current = true; try { await signOut(); } catch (e) { console.error(e); } setTimeout(() => { signingOutRef.current = false; }, 1500);
+      onState({ adminBusy: false, adminErr: "That account isn't registered as staff. Contact the owner." });
+      return;
+    }
+    onState({ adminAuthed: true, adminStaff: staff, adminBusy: false, adminErr: '', adminPass: '' });
+    window.scrollTo({ top: 0 });
+  };
+
+  // "Forgot password?" — email a reset link to the address in the email field.
+  // The link returns to this app (redirectTo) and triggers the recovery flow.
+  const onAdminForgot = async (email) => {
+    const addr = (email || '').trim();
+    if (!addr) { onState({ adminErr: 'Type your email above first, then tap “Forgot password?”.' }); return; }
+    onState({ adminBusy: true, adminErr: '' });
+    try {
+      const { error } = await sendPasswordReset(addr, window.location.origin);
+      if (error) { console.error('sendPasswordReset error', error); onState({ adminBusy: false, adminErr: authMsg(error) }); return; }
+      onState({ adminBusy: false });
+      showToast('Reset link sent — check your email.', 'success');
+    } catch (e) {
+      console.error('sendPasswordReset threw', e);
+      onState({ adminBusy: false, adminErr: authMsg(e) });
+    }
+  };
+
+  // Save the new password chosen in the recovery modal. Returns an error string
+  // on failure (the modal shows it), or null on success — after which we sign
+  // out and drop the user on the staff login to sign in with the new password.
+  const onSetNewPassword = async (password) => {
+    try {
+      const { error } = await updatePassword(password);
+      if (error) { console.error('updatePassword error', error); return authMsg(error); }
+    } catch (e) { console.error('updatePassword threw', e); return authMsg(e); }
+    signingOutRef.current = true;
+    try { await signOut(); } catch (e) { console.error(e); }
+    setTimeout(() => { signingOutRef.current = false; }, 1500);
+    onState({ recoveryOpen: false, view: 'admin', adminAuthed: false, adminStaff: null, adminPass: '' });
+    showToast('Password updated — sign in with your new password.', 'success');
+    window.scrollTo({ top: 0 });
+    return null;
+  };
+
+  // Staff sign-out: end the Supabase session and reset the console state.
+  const onAdminSignOut = async () => {
+    signingOutRef.current = true;
+    try { await signOut(); } catch (e) { console.error('admin signOut failed', e); }
+    onState({
+      adminAuthed: false, adminStaff: null,
+      adminEmail: '', adminPass: '', adminBusy: false, adminErr: '',
+      view: 'home',
+    });
+    setTimeout(() => { signingOutRef.current = false; }, 1500);
+    window.scrollTo({ top: 0 });
   };
 
   // Turn whatever Supabase / the network throws into a clear, human message.
@@ -514,8 +674,12 @@ export default function App() {
           <img src="/assets/logo.jpg" alt="Guapito's Barbershop" onClick={goHome} style={{ height: '40px', width: 'auto', cursor: 'pointer', borderRadius: '4px' }} />
           <div style={{ flex: '1' }}></div>
           {state.user.signedIn && (
-            <ProfileMenu user={state.user} goProfile={goProfile} goAccount={goAccount} onSignOut={onSignOut} />
+            <ProfileMenu user={state.user} goAccount={goAccount} onSignOut={onSignOut} />
           )}
+          <button onClick={goAccount} className="gb-appts-cta"
+            style={{ background: 'transparent', color: '#F4EFE7', fontFamily: "'Oswald'", fontWeight: '600', letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '14px', border: '1px solid #2A2622', borderRadius: '7px', padding: '11px 18px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            View Appointments
+          </button>
           <button onClick={requireBook} className="gb-book-cta"
             style={{ background: '#D6C3A0', color: '#0E0E0E', fontFamily: "'Oswald'", fontWeight: '600', letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '14px', border: 'none', borderRadius: '7px', padding: '11px 20px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
             Book Now
@@ -525,7 +689,7 @@ export default function App() {
 
       {/* VIEWS */}
       {state.view === 'home' && (
-        <HomeView goBook={goBook} goAccount={goAccount} goAdmin={goAdmin} navServices={navServices} />
+        <HomeView goBook={goBook} goAccount={goAccount} goAdmin={goAdmin} navServices={navServices} goReviews={goReviews} reviews={state.reviews} onWriteReview={openReviewModal} />
       )}
 
       {state.view === 'book' && (
@@ -533,33 +697,46 @@ export default function App() {
       )}
 
       {state.view === 'account' && (
-        <AccountView state={state} bookings={state.bookings} user={state.user} goBook={goBook} onState={onState} onUpdateBooking={onUpdateBooking} showAlert={showAlert} onSendOtp={onSendOtp} onVerifyOtp={onVerifyOtp} onToggleRemember={onToggleRemember} />
+        <AccountView state={state} bookings={state.bookings} user={state.user} goHome={goHome} goBook={goBook} onState={onState} onUpdateBooking={onUpdateBooking} showAlert={showAlert} onSendOtp={onSendOtp} onVerifyOtp={onVerifyOtp} onToggleRemember={onToggleRemember} onSignOut={onSignOut} />
       )}
 
       {state.view === 'profile' && (
         <ProfileView user={state.user} goBook={goBook} onSignOut={onSignOut} />
       )}
 
+      {state.view === 'reviews' && (
+        <ReviewsView reviews={state.reviews} goHome={goHome} onWriteReview={openReviewModal} />
+      )}
+
       {state.view === 'admin' && !state.adminAuthed && (
         <AdminLogin
-          adminUser={state.adminUser}
+          adminEmail={state.adminEmail}
           adminPass={state.adminPass}
+          adminBusy={state.adminBusy}
           adminErr={state.adminErr}
-          onAdminUser={e => onState({ adminUser: e.target.value, adminErr: '' })}
-          onAdminPass={e => onState({ adminPass: e.target.value, adminErr: '' })}
-          adminLogin={adminLogin}
+          onAdminEmail={v => onState({ adminEmail: v, adminErr: '' })}
+          onAdminPass={v => onState({ adminPass: v, adminErr: '' })}
+          onAdminLogin={onAdminLogin}
+          onAdminForgot={onAdminForgot}
           goHome={goHome}
         />
       )}
 
       {state.view === 'admin' && state.adminAuthed && (
-        <AdminShell state={state} onState={onState} goHome={goHome} onCreateBooking={onCreateBooking} onUpdateBooking={onUpdateBooking} onCheckIn={onCheckIn} showConfirm={showConfirm} />
+        <AdminShell state={state} onState={onState} goHome={goHome} onCreateBooking={onCreateBooking} onUpdateBooking={onUpdateBooking} onCheckIn={onCheckIn} showConfirm={showConfirm} onApproveReview={onApproveReview} onRejectReview={onRejectReview} onAdminSignOut={onAdminSignOut} />
       )}
 
       <Dialog dialog={state.dialog} onClose={closeDialog} />
       <Toast toast={state.toast} nonce={state.toastN} onClose={closeToast} />
       <AuthModal state={state} onState={onState} onClose={closeAuthModal}
         onSendOtp={onSendOtp} onVerifyOtp={onVerifyOtp} onToggleRemember={onToggleRemember} />
+      {state.reviewModalOpen && (
+        <ReviewModal onClose={closeReviewModal} onSubmit={onSubmitReview}
+          defaultName={`${state.user.firstName || ''} ${state.user.lastName || ''}`.trim()} />
+      )}
+      {state.recoveryOpen && (
+        <ResetPasswordModal onSubmit={onSetNewPassword} />
+      )}
       {state.user.signedIn && <SessionTimer loginAt={state.user.loginAt} />}
     </div>
   );

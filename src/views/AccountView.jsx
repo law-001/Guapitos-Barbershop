@@ -1,7 +1,16 @@
 import { barberById, timeLabel, statusMeta, nowMs } from '../helpers';
 
-export default function AccountView({ state, bookings, user, goBook, onState, onUpdateBooking, showAlert, onSendOtp, onVerifyOtp, onToggleRemember }) {
+export default function AccountView({ state, bookings, user, goHome, goBook, onState, onUpdateBooking, showAlert, onSendOtp, onVerifyOtp, onToggleRemember, onSignOut }) {
   const accent = '#D6C3A0';
+
+  // Back-to-landing button — sits on the heading row, pushed to the far right of
+  // the title (the heading row uses justifyContent:'space-between'). `flexShrink:0`
+  // keeps it from squishing; it drops below the title on very narrow screens.
+  const backBtn = (
+    <button onClick={goHome} style={{flexShrink:0,display:'inline-flex',alignItems:'center',gap:'7px',background:'transparent',border:'1px solid #2A2622',color:'#9A9388',borderRadius:'8px',padding:'8px 14px',cursor:'pointer',fontSize:'14px',fontWeight:'600'}}>
+      <span style={{fontSize:'16px',lineHeight:'1'}}>←</span> Back to home
+    </button>
+  );
   const nowAbs = nowMs();
   const startMs = b => new Date(b.date+'T00:00:00').getTime()+b.start*60000;
 
@@ -13,8 +22,13 @@ export default function AccountView({ state, bookings, user, goBook, onState, on
     const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s.emailInput||'').trim());
     return (
       <main style={{maxWidth:'460px',margin:'0 auto',padding:'clamp(40px,8vw,90px) clamp(16px,4vw,32px) 80px',animation:'gbfade 0.4s ease both'}}>
-        <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:accent,marginBottom:'10px'}}>My appointments</div>
-        <h1 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(28px,5vw,44px)',margin:'0 0 6px',lineHeight:'1'}}>Sign in to view</h1>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'16px',flexWrap:'wrap',marginBottom:'6px'}}>
+          <div>
+            <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:accent,marginBottom:'10px'}}>My appointments</div>
+            <h1 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(28px,5vw,44px)',margin:'0',lineHeight:'1'}}>Sign in to view</h1>
+          </div>
+          {backBtn}
+        </div>
         <p style={{color:'#9A9388',margin:'0 0 26px'}}>Verify your email to see and manage your bookings. We'll send a one-time code.</p>
         {s.authStep==='email' && (
           <>
@@ -81,11 +95,63 @@ export default function AccountView({ state, bookings, user, goBook, onState, on
     window.scrollTo({top:0});
   };
 
-  return (
-    <main style={{maxWidth:'820px',margin:'0 auto',padding:'clamp(28px,5vw,52px) clamp(16px,4vw,32px) 80px',animation:'gbfade 0.4s ease both'}}>
-      <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:accent,marginBottom:'10px'}}>{user.firstName?'Hello, '+user.firstName:'Guest'}</div>
-      <h1 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(30px,5vw,52px)',margin:'0 0 30px',lineHeight:'1'}}>My appointments</h1>
+  const hair = '#2A2622';
+  const fullName = `${user.firstName||''} ${user.lastName||''}`.trim();
+  const initial = (user.firstName || user.email || '?').trim().charAt(0).toUpperCase();
+  const profileRows = [
+    ['Email', user.email],
+    ['First name', user.firstName],
+    ['Last name', user.lastName],
+    ['Mobile', user.mobile],
+  ];
 
+  return (
+    <main style={{maxWidth:'1080px',margin:'0 auto',padding:'clamp(28px,5vw,52px) clamp(16px,4vw,32px) 80px',animation:'gbfade 0.4s ease both'}}>
+      {/* Heading row: title block on the left, back button on the far right.
+          `justifyContent:'space-between'` pushes them apart; `gap:'16px'` is the
+          min space between them before the button wraps to its own line. */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'16px',flexWrap:'wrap',marginBottom:'30px'}}>
+        <div>
+          <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:accent,marginBottom:'10px'}}>{user.firstName?'Hello, '+user.firstName:'Guest'}</div>
+          <h1 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(30px,5vw,52px)',margin:'0',lineHeight:'1'}}>My account</h1>
+        </div>
+        {backBtn}
+      </div>
+
+      {/* Two columns side by side: Profile | Appointments. `gap:'28px'` = space
+          between the columns. flexWrap stacks them on narrow screens. */}
+      <div style={{display:'flex',flexWrap:'wrap',gap:'28px',alignItems:'flex-start'}}>
+
+      {/* LEFT COLUMN — PROFILE (merged in from the old standalone Profile view).
+          `flex:'1 1 300px'` = grow share + 300px ideal width. */}
+      <div style={{flex:'1 1 300px',minWidth:'280px'}}>
+      <div style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.12em',fontSize:'14px',color:'#F4EFE7',marginBottom:'14px'}}>Profile</div>
+      <div style={{background:'#15130F',border:'1px solid '+hair,borderRadius:'16px',padding:'24px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:'16px',paddingBottom:'18px',borderBottom:'1px solid '+hair}}>
+          <span style={{flexShrink:'0',display:'flex',alignItems:'center',justifyContent:'center',width:'56px',height:'56px',borderRadius:'50%',background:accent,color:'#0E0E0E',fontFamily:"'Oswald'",fontWeight:'700',fontSize:'24px'}}>{initial}</span>
+          <div style={{minWidth:'0'}}>
+            <div style={{fontFamily:"'Oswald'",fontSize:'20px',lineHeight:'1.2'}}>{fullName || 'Your profile'}</div>
+            <div style={{color:'#9A9388',fontSize:'14px',wordBreak:'break-word'}}>{user.email}</div>
+          </div>
+        </div>
+        <div style={{paddingTop:'6px'}}>
+          {profileRows.map(([label, value]) => (
+            <div key={label} style={{display:'flex',justifyContent:'space-between',gap:'12px',padding:'14px 0',borderBottom:'1px solid '+hair}}>
+              <span style={{color:'#9A9388'}}>{label}</span>
+              <span style={{fontFamily:"'Oswald'",fontSize:'16px',textAlign:'right',wordBreak:'break-word'}}>{value || <span style={{color:'#6b645b'}}>—</span>}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:'10px',marginTop:'18px'}}>
+          <button onClick={goBook} style={{cursor:'pointer',background:accent,color:'#0E0E0E',border:'none',borderRadius:'9px',padding:'13px 20px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.05em',textTransform:'uppercase',fontSize:'14px'}}>Book an appointment</button>
+          {onSignOut && <button onClick={onSignOut} style={{cursor:'pointer',background:'transparent',color:'#F4EFE7',border:'1px solid '+hair,borderRadius:'9px',padding:'13px 20px',fontWeight:'600',fontSize:'14px'}}>Sign out</button>}
+        </div>
+      </div>
+      </div>{/* end LEFT COLUMN */}
+
+      {/* RIGHT COLUMN — APPOINTMENTS. `flex:'1.6 1 380px'` = wider share than the
+          profile column so the booking cards have room. */}
+      <div style={{flex:'1.6 1 380px',minWidth:'300px'}}>
       <div style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.12em',fontSize:'14px',color:'#F4EFE7',marginBottom:'14px'}}>Upcoming</div>
       {upcoming.length===0 && (
         <div style={{background:'#15130F',border:'1px solid #2A2622',borderRadius:'14px',padding:'30px',textAlign:'center',color:'#9A9388',marginBottom:'34px'}}>
@@ -135,6 +201,9 @@ export default function AccountView({ state, bookings, user, goBook, onState, on
           );
         })}
       </div>
+      </div>{/* end RIGHT COLUMN */}
+
+      </div>{/* end two-column row */}
     </main>
   );
 }
