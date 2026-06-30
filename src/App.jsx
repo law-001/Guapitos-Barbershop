@@ -4,8 +4,9 @@ import { iso, todayDate, timeLabel, genId } from './helpers';
 import { fetchBookings, insertBooking, updateBooking as apiUpdateBooking } from './lib/bookingsApi';
 import { fetchReviews, fetchAllReviews, insertReview, approveReview, deleteReview } from './lib/reviewsApi';
 import { canPostReview, recordReviewPost } from './lib/reviewRateLimit';
+import { canRequestReset } from './lib/resetRateLimit';
 import { fetchStaffByEmail } from './lib/staffApi';
-import { sendEmailOtp, verifyEmailOtp, signInWithPassword, sendPasswordReset, updatePassword, onPasswordRecovery, signOut, getSession, onAuthChange } from './lib/auth';
+import { sendEmailOtp, verifyEmailOtp, staffLogin, setSession, sendPasswordReset, updatePassword, onPasswordRecovery, signOut, getSession, onAuthChange } from './lib/auth';
 import { setRemember } from './lib/supabase';
 import { fetchUser, upsertUser, touchLogin } from './lib/usersApi';
 import { isExpired, isSessionExpired, SESSION_MAX_MS } from './lib/session';
@@ -24,6 +25,21 @@ import ReviewModal from './ReviewModal';
 import ResetPasswordModal from './ResetPasswordModal';
 
 const todayIso = iso(todayDate());
+
+// True when this page load came from a password-reset link. Supabase returns the
+// recovery token either in the hash (#...type=recovery) or, with PKCE, as a
+// ?code= query param. This app has no other redirect/OAuth flow, so a code param
+// on load is always a recovery. Used to suppress the customer session-expiry
+// logic, which would otherwise sign out the temporary recovery session before
+// the user can save a new password.
+const urlLooksLikeRecovery = () => {
+  try {
+    return (window.location.hash || '').includes('type=recovery') || /[?&]code=/.test(window.location.search || '');
+  } catch { return false; }
+};
+
+// Human-friendly wait time for a lockout countdown ("45s" / "5m").
+const fmtWait = (secs) => (secs >= 60 ? `${Math.ceil(secs / 60)}m` : `${Math.max(0, Math.ceil(secs))}s`);
 
 // DEBUG: floating countdown to absolute session expiry (loginAt + SESSION_MAX_MS).
 // Ticks every second so we can eyeball that the clock is running. Remove later.
@@ -85,6 +101,7 @@ const initState = {
   adminPass: '',
   adminBusy: false,        // true while a staff auth request is in flight
   adminErr: '',
+  adminLockUntil: 0,       // epoch ms the staff login is locked until (from the server throttle)
   recoveryOpen: false,     // true after a password-reset link is opened
   adminNavOpen: true,
   adminPage: 'dashboard',
@@ -143,6 +160,18 @@ export default function App() {
   // session loss and double-fire the expiry toast.
   const signingOutRef = useRef(false);
 
+  // True for the lifetime of a password-recovery page load. While set, the
+  // customer session-restore/expiry effects below stand down so they don't tear
+  // down the recovery session out from under updateUser().
+  const recoveringRef = useRef(urlLooksLikeRecovery());
+
+  // Guards against concurrent "Forgot password?" sends: set synchronously the
+  // instant a request starts, so rapid double-clicks during the async send are
+  // ignored (the rate-limit timestamps only get written after a send completes).
+  const resetInFlightRef = useRef(false);
+  // Same idea for the staff Sign in button — block concurrent submits.
+  const loginInFlightRef = useRef(false);
+
   // Tear down the session: clear Supabase's tokens (server + local storage),
   // reset the UI to signed-out, bounce off any protected view, and show `message`.
   const expireRef = useRef(async () => {});
@@ -168,6 +197,7 @@ export default function App() {
   const validateRef = useRef(async () => {});
   useEffect(() => {
     validateRef.current = async () => {
+      if (recoveringRef.current) return;
       const u = userRef.current;
       if (!u.signedIn || !u.email) return;
       if (await isSessionExpired(u.email)) {
@@ -220,6 +250,9 @@ export default function App() {
   // We then subscribe to auth changes: if the session vanishes externally (server
   // expiry, refresh-token death, sign-out in another tab) we sign out locally too.
   useEffect(() => {
+    // During password recovery, leave the recovery session alone — restoring it
+    // as a "customer" and running the expiry check would sign it out.
+    if (recoveringRef.current) return undefined;
     let active = true;
     getSession().then(async (session) => {
       if (!active || !session?.user?.email) return;
@@ -249,7 +282,22 @@ export default function App() {
   // token in the URL and fires PASSWORD_RECOVERY. Show the "set new password"
   // modal so they can choose one (saved against the temporary recovery session).
   useEffect(() => {
-    const unsub = onPasswordRecovery(() => onState({ recoveryOpen: true }));
+    const unsub = onPasswordRecovery(async () => {
+      recoveringRef.current = true;
+      // Only offer the set-new-password form if the recovery session belongs to
+      // an active staff member. Otherwise sign out and ignore (no reset UI).
+      let addr = '';
+      try { const s = await getSession(); addr = s?.user?.email || ''; } catch { /* no session */ }
+      const staff = addr ? await fetchStaffByEmail(addr) : null;
+      if (!staff) {
+        recoveringRef.current = false;
+        signingOutRef.current = true;
+        try { await signOut(); } catch (e) { console.error(e); }
+        setTimeout(() => { signingOutRef.current = false; }, 1500);
+        return;
+      }
+      onState({ recoveryOpen: true });
+    });
     return () => unsub();
   }, []);
 
@@ -438,27 +486,52 @@ export default function App() {
   // table) --- Accounts are created by the owner in the Supabase dashboard; this
   // signs them in, then confirms the email is an active staff row before
   // unlocking. A valid login for a non-staff email is rejected (and signed out).
+  // Staff sign-in via the `staff-login` Edge Function, which enforces the
+  // progressive brute-force throttle server-side and returns a session only on
+  // success. The browser just relays the result and (on success) installs the
+  // session, then confirms staff membership.
   const onAdminLogin = async (email, password) => {
     const addr = (email || '').trim();
     if (!addr || !password) { onState({ adminErr: 'Enter your email and password.' }); return; }
+    if (loginInFlightRef.current) return;
+    loginInFlightRef.current = true;
     onState({ adminBusy: true, adminErr: '' });
     setRemember(true);
-    let error;
-    try { ({ error } = await signInWithPassword(addr, password)); }
-    catch (e) { console.error('admin signIn threw', e); onState({ adminBusy: false, adminErr: authMsg(e) }); return; }
-    if (error) {
-      console.error('admin signIn error', error);
-      const msg = /invalid login|invalid credentials/i.test(error.message || '') ? 'Email or password is incorrect.' : authMsg(error);
-      onState({ adminBusy: false, adminErr: msg }); return;
+    try {
+      const data = await staffLogin(addr, password);
+      if (!data || data.result === 'error') {
+        onState({ adminBusy: false, adminErr: 'Could not reach the login service. Please try again.' }); return;
+      }
+      if (data.result === 'locked') {
+        onState({ adminBusy: false, adminLockUntil: Date.now() + (data.retry_after || 0) * 1000,
+          adminErr: `Too many attempts. Try again in ${fmtWait(data.retry_after || 0)}.` });
+        return;
+      }
+      if (data.result === 'invalid') {
+        const left = data.attempts_left ?? 0;
+        onState({ adminBusy: false,
+          adminErr: left > 0 ? `Email or password is incorrect. ${left} attempt${left === 1 ? '' : 's'} left.` : 'Email or password is incorrect.' });
+        return;
+      }
+      if (data.result !== 'ok' || !data.access_token) {
+        onState({ adminBusy: false, adminErr: 'Login failed. Please try again.' }); return;
+      }
+      // Install the session the function handed back.
+      const { error: sErr } = await setSession(data.access_token, data.refresh_token);
+      if (sErr) { console.error('setSession failed', sErr); onState({ adminBusy: false, adminErr: 'Could not start your session. Please try again.' }); return; }
+      // Authorization: must be an active staff member.
+      const staff = await fetchStaffByEmail(addr);
+      if (!staff) {
+        signingOutRef.current = true; try { await signOut(); } catch (e) { console.error(e); } setTimeout(() => { signingOutRef.current = false; }, 1500);
+        onState({ adminBusy: false, adminErr: "That account isn't registered as staff. Contact the owner." });
+        return;
+      }
+      recoveringRef.current = false;
+      onState({ adminAuthed: true, adminStaff: staff, adminBusy: false, adminErr: '', adminPass: '', adminLockUntil: 0 });
+      window.scrollTo({ top: 0 });
+    } finally {
+      loginInFlightRef.current = false;
     }
-    const staff = await fetchStaffByEmail(addr);
-    if (!staff) {
-      signingOutRef.current = true; try { await signOut(); } catch (e) { console.error(e); } setTimeout(() => { signingOutRef.current = false; }, 1500);
-      onState({ adminBusy: false, adminErr: "That account isn't registered as staff. Contact the owner." });
-      return;
-    }
-    onState({ adminAuthed: true, adminStaff: staff, adminBusy: false, adminErr: '', adminPass: '' });
-    window.scrollTo({ top: 0 });
   };
 
   // "Forgot password?" — email a reset link to the address in the email field.
@@ -466,8 +539,18 @@ export default function App() {
   const onAdminForgot = async (email) => {
     const addr = (email || '').trim();
     if (!addr) { onState({ adminErr: 'Type your email above first, then tap “Forgot password?”.' }); return; }
+    // Ignore clicks while a send is already in flight (synchronous guard — beats
+    // the async state update that disables the button).
+    if (resetInFlightRef.current) return;
+    // Rate-limit reset requests so the button can't be spammed.
+    const gate = canRequestReset();
+    if (!gate.ok) { onState({ adminErr: gate.error }); return; }
+    resetInFlightRef.current = true;
     onState({ adminBusy: true, adminErr: '' });
     try {
+      // Only staff may reset a staff password — don't email a link to anyone else.
+      const staff = await fetchStaffByEmail(addr);
+      if (!staff) { onState({ adminBusy: false, adminErr: "That email isn't registered as staff. Contact the owner." }); return; }
       const { error } = await sendPasswordReset(addr, window.location.origin);
       if (error) { console.error('sendPasswordReset error', error); onState({ adminBusy: false, adminErr: authMsg(error) }); return; }
       onState({ adminBusy: false });
@@ -475,6 +558,8 @@ export default function App() {
     } catch (e) {
       console.error('sendPasswordReset threw', e);
       onState({ adminBusy: false, adminErr: authMsg(e) });
+    } finally {
+      resetInFlightRef.current = false;
     }
   };
 
@@ -500,6 +585,7 @@ export default function App() {
       const { error } = await updatePassword(password);
       if (error) { console.error('updatePassword error', error); return passwordErr(error); }
     } catch (e) { console.error('updatePassword threw', e); return passwordErr(e); }
+    recoveringRef.current = false;
     signingOutRef.current = true;
     try { await signOut(); } catch (e) { console.error(e); }
     setTimeout(() => { signingOutRef.current = false; }, 1500);
@@ -728,6 +814,7 @@ export default function App() {
           adminPass={state.adminPass}
           adminBusy={state.adminBusy}
           adminErr={state.adminErr}
+          adminLockUntil={state.adminLockUntil}
           onAdminEmail={v => onState({ adminEmail: v, adminErr: '' })}
           onAdminPass={v => onState({ adminPass: v, adminErr: '' })}
           onAdminLogin={onAdminLogin}

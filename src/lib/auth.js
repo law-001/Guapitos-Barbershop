@@ -18,11 +18,19 @@ export async function verifyEmailOtp(email, token) {
   return supabase.auth.verifyOtp({ email, token, type: 'email' })
 }
 
-// Email + password sign-in — used by the staff console. The account (with its
-// password) is created by the owner in the Supabase dashboard; this just signs
-// them in. Staff access is then gated by the staff-table check in the app.
-export async function signInWithPassword(email, password) {
-  return supabase.auth.signInWithPassword({ email, password })
+// Staff sign-in goes through the `staff-login` Edge Function so the progressive
+// brute-force throttle is enforced server-side (the browser is never trusted to
+// gate lockouts). Returns the function's JSON body: { result, ... } where result
+// is 'ok' (with access_token/refresh_token) | 'invalid' | 'locked' | 'error'.
+export async function staffLogin(email, password) {
+  const { data, error } = await supabase.functions.invoke('staff-login', { body: { email, password } })
+  if (error) return { result: 'error', message: error.message }
+  return data
+}
+
+// Install a session from tokens the Edge Function returned after a good login.
+export async function setSession(access_token, refresh_token) {
+  return supabase.auth.setSession({ access_token, refresh_token })
 }
 
 // Email a password-reset link. `redirectTo` is where the link lands back in the
