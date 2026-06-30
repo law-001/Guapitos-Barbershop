@@ -1,25 +1,35 @@
+// `excl` = mutual-exclusion group. Selecting one service in a group auto-deselects
+// any other in the SAME group (radio-style), so the customer can't pick two
+// variants that don't make sense together:
+//   'cut'        — Haircut / Guapito's Signature / Women's Cut (one base cut only)
+//   'haircolor'  — Hair Color Ordinary vs Organic (one finish)
+//   'beardcolor' — Beard Color Ordinary vs Organic (one finish)
+// Signature Shave has no group, so it can be added on top of any cut.
 export const SERVICES = [
-  {id:'hc',cat:'Cuts & Shave',name:'Haircut',sub:'with shampoo',price:300,dur:45},
-  {id:'sig',cat:'Cuts & Shave',name:"Guapito's Signature",sub:'shampoo + face massage',price:350,dur:60},
+  {id:'hc',cat:'Cuts & Shave',name:'Haircut',sub:'with shampoo',price:300,dur:45,excl:'cut'},
+  {id:'sig',cat:'Cuts & Shave',name:"Guapito's Signature",sub:'shampoo + face massage',price:350,dur:60,excl:'cut'},
   {id:'shave',cat:'Cuts & Shave',name:'Signature Shave',sub:'',price:300,dur:30},
-  {id:'wcut',cat:'Cuts & Shave',name:"Women's Cut",sub:'',price:400,dur:60},
+  {id:'wcut',cat:'Cuts & Shave',name:"Women's Cut",sub:'',price:400,dur:60,excl:'cut'},
   {id:'deepcon',cat:'Treatments',name:'Deep Conditioning',sub:'',price:900,dur:45},
   {id:'dryscalp',cat:'Treatments',name:'Dry Scalp Treatment',sub:'',price:950,dur:45},
   {id:'antidan',cat:'Treatments',name:'Anti Dandruff',sub:'',price:950,dur:45},
   {id:'massage',cat:'Treatments',name:'Massage',sub:'scalp / back / hand · 15 min',price:300,dur:15},
-  {id:'hcolO',cat:'Color',name:'Hair Color — Ordinary',sub:'',price:750,dur:90},
-  {id:'hcolG',cat:'Color',name:'Hair Color — Organic',sub:'',price:1050,dur:90},
-  {id:'bcolO',cat:'Color',name:'Beard Color — Ordinary',sub:'',price:550,dur:45},
-  {id:'bcolG',cat:'Color',name:'Beard Color — Organic',sub:'',price:850,dur:45},
-  {id:'pkgCS',cat:'Packages',name:'Cut & Shave',sub:'',price:550,dur:75},
-  {id:'pkgDC',cat:'Packages',name:'Cut & Treatment',sub:'Deep Conditioning',price:1200,dur:90},
-  {id:'pkgAD',cat:'Packages',name:'Cut & Treatment',sub:'Anti Dandruff / Dry Scalp',price:1250,dur:90},
-  {id:'pkgCO',cat:'Packages',name:'Cut & Color — Ordinary',sub:'',price:1100,dur:120},
-  {id:'pkgCOg',cat:'Packages',name:'Cut & Color — Organic',sub:'',price:1400,dur:120},
+  {id:'hcolO',cat:'Color',name:'Hair Color — Ordinary',sub:'',price:750,dur:90,excl:'haircolor'},
+  {id:'hcolG',cat:'Color',name:'Hair Color — Organic',sub:'',price:1050,dur:90,excl:'haircolor'},
+  {id:'bcolO',cat:'Color',name:'Beard Color — Ordinary',sub:'',price:550,dur:45,excl:'beardcolor'},
+  {id:'bcolG',cat:'Color',name:'Beard Color — Organic',sub:'',price:850,dur:45,excl:'beardcolor'},
+  // 'cutpkg' — every "Cut & …" package competes for the one cut, so only one can
+  // be picked. 'lighten' — Highlights / Bleach are one-per-visit lightening jobs.
+  // Perm has no group (can be added alongside).
+  {id:'pkgCS',cat:'Packages',name:'Cut & Shave',sub:'',price:550,dur:75,excl:'cutpkg'},
+  {id:'pkgDC',cat:'Packages',name:'Cut & Treatment',sub:'Deep Conditioning',price:1200,dur:90,excl:'cutpkg'},
+  {id:'pkgAD',cat:'Packages',name:'Cut & Treatment',sub:'Anti Dandruff / Dry Scalp',price:1250,dur:90,excl:'cutpkg'},
+  {id:'pkgCO',cat:'Packages',name:'Cut & Color — Ordinary',sub:'',price:1100,dur:120,excl:'cutpkg'},
+  {id:'pkgCOg',cat:'Packages',name:'Cut & Color — Organic',sub:'',price:1400,dur:120,excl:'cutpkg'},
   {id:'perm',cat:'Packages',name:'Perm',sub:'',price:2000,dur:120},
-  {id:'hlO',cat:'Packages',name:'Highlights — Only',sub:'',price:1200,dur:150},
-  {id:'hlB',cat:'Packages',name:'Highlights — w/ Base Color',sub:'',price:1900,dur:150},
-  {id:'bleach',cat:'Packages',name:'Bleach / Fashion Color',sub:'',price:1800,dur:150}
+  {id:'hlO',cat:'Packages',name:'Highlights — Only',sub:'',price:1200,dur:150,excl:'lighten'},
+  {id:'hlB',cat:'Packages',name:'Highlights — w/ Base Color',sub:'',price:1900,dur:150,excl:'lighten'},
+  {id:'bleach',cat:'Packages',name:'Bleach / Fashion Color',sub:'',price:1800,dur:150,excl:'lighten'}
 ];
 
 export const CATS = ['Cuts & Shave','Treatments','Color','Packages'];

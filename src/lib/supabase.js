@@ -9,17 +9,18 @@ if (!url || !key) {
   console.error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY in .env.local')
 }
 
-// --- Remember me -------------------------------------------------------------
-// The "Remember me" choice decides WHERE Supabase keeps the auth session:
-//   checked   → localStorage   — survives closing the browser; lasts until the
-//               server-side session expiry set in the Supabase dashboard.
-//   unchecked → sessionStorage — wiped the moment the tab/browser closes.
-// The session lifetime itself is server-side (dashboard → Auth → Sessions);
-// this flag only controls persistence on THIS device. The flag lives in
-// localStorage so the storage adapter below can read it on every access.
+// --- Keep me signed in -------------------------------------------------------
+// The "Keep me signed in on this device" choice decides two things:
+//   checked   → localStorage   — survives closing the browser; long absolute
+//               expiry window (SESSION_REMEMBER_MS, ~1 month — see lib/session).
+//   unchecked → sessionStorage — wiped the moment the tab/browser closes; short
+//               absolute expiry window (SESSION_MAX_MS, ~24h). DEFAULT.
+// This flag controls device persistence here; lib/session reads it to pick the
+// matching expiry window. The flag lives in localStorage so the storage adapter
+// below (and the expiry check) can read it on every access.
 const REMEMBER_KEY = 'gb_remember'
-// Default to remembering (matches the app's prior always-persist behavior).
-export const getRemember = () => { try { return localStorage.getItem(REMEMBER_KEY) !== '0' } catch { return true } }
+// Default to NOT remembering (unchecked): a stored '1' is the only "remember".
+export const getRemember = () => { try { return localStorage.getItem(REMEMBER_KEY) === '1' } catch { return false } }
 export const setRemember = (v) => { try { localStorage.setItem(REMEMBER_KEY, v ? '1' : '0') } catch { /* ignore */ } }
 
 // Storage adapter Supabase uses for the auth token. Writes go to the store the

@@ -1,6 +1,6 @@
 import { barberById, timeLabel, statusMeta, nowMs } from '../helpers';
 
-export default function AccountView({ state, bookings, user, goHome, goBook, onState, onUpdateBooking, showAlert, onSendOtp, onVerifyOtp, onToggleRemember, onSignOut }) {
+export default function AccountView({ state, bookings, user, goHome, goBook, onState, onUpdateBooking, showAlert, confirmCancel, onSendOtp, onVerifyOtp, onToggleRemember, onSignOut }) {
   const accent = '#D6C3A0';
 
   // Back-to-landing button — sits on the heading row, pushed to the far right of
@@ -22,8 +22,8 @@ export default function AccountView({ state, bookings, user, goHome, goBook, onS
     const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s.emailInput||'').trim());
     return (
       <main style={{maxWidth:'460px',margin:'0 auto',padding:'clamp(40px,8vw,90px) clamp(16px,4vw,32px) 80px',animation:'gbfade 0.4s ease both'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'16px',flexWrap:'wrap',marginBottom:'6px'}}>
-          <div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:'16px',marginBottom:'6px'}}>
+          <div style={{flex:'1 1 auto',minWidth:0}}>
             <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:accent,marginBottom:'10px'}}>My appointments</div>
             <h1 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(28px,5vw,44px)',margin:'0',lineHeight:'1'}}>Sign in to view</h1>
           </div>
@@ -84,7 +84,10 @@ export default function AccountView({ state, bookings, user, goHome, goBook, onS
 
   const cancelBooking = (b) => {
     if(startMs(b)-nowAbs < cutoff){ showAlert("Sorry — bookings can't be changed within 2 hours of the appointment. Please call the shop.", {title:'Too close to appointment'}); return; }
-    onUpdateBooking(b.id,{status:'cancelled'});
+    // Reuse the same rich cancel popup the email-link flow uses — shows the full
+    // booking summary and only cancels on confirm. Falls back to an immediate
+    // cancel if no handler was passed in.
+    if(confirmCancel){ confirmCancel(b); } else { onUpdateBooking(b.id,{status:'cancelled'}); }
   };
   const startReschedule = (b) => {
     onState({view:'book',step:'datetime',reschedulingId:b.id,barber:b.barber,date:null,time:null,cart:[]});

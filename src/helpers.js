@@ -24,6 +24,10 @@ export const nowMs = () => Date.now();
 let _idSeq = 0;
 export const genId = (prefix='') => prefix + Date.now().toString(36) + (++_idSeq).toString(36);
 
+// Customer-facing booking reference (GB-XXXXX). Lives here as a plain module fn
+// so component bodies stay pure — Math.random must not be called during render.
+export const genRef = () => 'GB-' + Math.random().toString(36).slice(2,7).toUpperCase();
+
 export const durLabel = m => {
   const h=Math.floor(m/60), mm=m%60;
   let s='';
@@ -48,6 +52,59 @@ export const dateFull = isoStr => {
 
 export const svcById = id => SERVICES.find(s=>s.id===id);
 export const barberById = id => BARBERS.find(b=>b.id===id);
+
+// --- Auto packages ----------------------------------------------------------
+// When a customer hand-picks à-la-carte services that match a bundled package
+// AND the package is cheaper than buying those parts apart, the package price +
+// duration replace those parts. Base cut is 'Haircut only' (hc) per shop pricing
+// — to let other cuts qualify, add recipes (e.g. swap 'hc' for 'sig'/'wcut').
+// Each recipe: { pkg:<package service id>, parts:[<component service ids>] }.
+export const PACKAGE_RECIPES = [
+  { pkg:'pkgCS',  parts:['hc','shave'] },    // Cut & Shave
+  { pkg:'pkgDC',  parts:['hc','deepcon'] },  // Cut & Treatment — Deep Conditioning
+  { pkg:'pkgAD',  parts:['hc','antidan'] },  // Cut & Treatment — Anti Dandruff
+  { pkg:'pkgAD',  parts:['hc','dryscalp'] }, // Cut & Treatment — Dry Scalp
+  { pkg:'pkgCO',  parts:['hc','hcolO'] },    // Cut & Color — Ordinary
+  { pkg:'pkgCOg', parts:['hc','hcolG'] },    // Cut & Color — Organic
+];
+
+// Resolve a cart (array of service ids) into a package-adjusted breakdown:
+//   { packages:[{pkg, parts, save}], leftovers:[id], total, dur, saved }
+// Greedy: each recipe consumes its component ids once, and only when the package
+// beats the sum of those parts — so the customer never pays MORE than à la carte.
+export const applyPackages = (cart=[]) => {
+  const ids = [...cart];
+  const used = new Array(ids.length).fill(false);
+  const packages = [];
+  for(const r of PACKAGE_RECIPES){
+    const slots = r.parts.map(pid => ids.findIndex((c,i)=>!used[i] && c===pid));
+    if(slots.some(i=>i<0)) continue;                  // a component missing or already taken
+    const partsSum = r.parts.reduce((sum,pid)=>sum+(svcById(pid)?.price||0),0);
+    const pkg = svcById(r.pkg);
+    if(!pkg || pkg.price>=partsSum) continue;         // apply only if it actually saves
+    slots.forEach(i=>{ used[i]=true; });
+    packages.push({ pkg, parts:r.parts, save: partsSum-pkg.price });
+  }
+  const leftovers = ids.filter((c,i)=>!used[i]);
+  const indivPrice = leftovers.reduce((sum,id)=>sum+(svcById(id)?.price||0),0);
+  const indivDur   = leftovers.reduce((sum,id)=>sum+(svcById(id)?.dur||0),0);
+  return {
+    packages, leftovers,
+    total: indivPrice + packages.reduce((sum,p)=>sum+p.pkg.price,0),
+    dur:   indivDur   + packages.reduce((sum,p)=>sum+p.pkg.dur,0),
+    saved: packages.reduce((sum,p)=>sum+p.save,0),
+  };
+};
+
+// Human label for a package-adjusted cart, e.g. "Cut & Shave + Hair Color — Organic".
+// Package parts collapse into the package name; leftover services list as-is.
+export const cartServiceLabel = (cart=[]) => {
+  const { packages, leftovers } = applyPackages(cart);
+  return [
+    ...packages.map(p=>p.pkg.name + (p.pkg.sub?` — ${p.pkg.sub}`:'')),
+    ...leftovers.map(id=>svcById(id)?.name).filter(Boolean),
+  ].join(' + ');
+};
 
 export const tint = (hex, a) => {
   const h=hex.replace('#','');
