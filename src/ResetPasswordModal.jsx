@@ -5,10 +5,29 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 
+// Eye / eye-off icon that toggles password visibility. `on` = password shown.
+const EyeToggle = ({ on, onClick }) => (
+  <button type="button" onClick={onClick} aria-label={on ? 'Hide password' : 'Show password'}
+    style={{ position: 'absolute', top: '50%', right: '10px', transform: 'translateY(-50%)', background: 'transparent', border: 'none', cursor: 'pointer', color: '#9A9388', padding: '4px', lineHeight: '0' }}>
+    {on ? (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+        <line x1="1" y1="1" x2="23" y2="23" />
+      </svg>
+    ) : (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    )}
+  </button>
+);
+
 export default function ResetPasswordModal({ onSubmit }) {
   const accent = '#D6C3A0', hair = '#2A2622';
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
+  const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -30,13 +49,19 @@ export default function ResetPasswordModal({ onSubmit }) {
         <h2 style={{ fontFamily: "'Oswald'", fontWeight: '700', textTransform: 'uppercase', fontSize: 'clamp(22px,4vw,30px)', margin: '0 0 18px', lineHeight: '1.05' }}>Set a new password</h2>
 
         <label style={{ display: 'block', fontSize: '13px', color: '#9A9388', marginBottom: '7px' }}>New password</label>
-        <input type="password" value={pw} onChange={e => { setPw(e.target.value); setErr(''); }} placeholder="••••••••" autoComplete="new-password" autoFocus
-          style={{ width: '100%', boxSizing: 'border-box', background: '#1D1A15', border: '1px solid ' + hair, borderRadius: '10px', padding: '13px', color: '#F4EFE7', fontSize: '16px', marginBottom: '14px' }} />
+        <div style={{ position: 'relative', marginBottom: '14px' }}>
+          <input type={show ? 'text' : 'password'} value={pw} onChange={e => { setPw(e.target.value); setErr(''); }} placeholder="••••••••" autoComplete="new-password" autoFocus
+            style={{ width: '100%', boxSizing: 'border-box', background: '#1D1A15', border: '1px solid ' + hair, borderRadius: '10px', padding: '13px', paddingRight: '44px', color: '#F4EFE7', fontSize: '16px' }} />
+          <EyeToggle on={show} onClick={() => setShow(s => !s)} />
+        </div>
 
         <label style={{ display: 'block', fontSize: '13px', color: '#9A9388', marginBottom: '7px' }}>Confirm new password</label>
-        <input type="password" value={pw2} onChange={e => { setPw2(e.target.value); setErr(''); }}
-          onKeyDown={e => { if (e.key === 'Enter') submit(); }} placeholder="••••••••" autoComplete="new-password"
-          style={{ width: '100%', boxSizing: 'border-box', background: '#1D1A15', border: `1px solid ${err ? '#C2553B' : hair}`, borderRadius: '10px', padding: '13px', color: '#F4EFE7', fontSize: '16px', marginBottom: '16px' }} />
+        <div style={{ position: 'relative', marginBottom: '16px' }}>
+          <input type={show ? 'text' : 'password'} value={pw2} onChange={e => { setPw2(e.target.value); setErr(''); }}
+            onKeyDown={e => { if (e.key === 'Enter') submit(); }} placeholder="••••••••" autoComplete="new-password"
+            style={{ width: '100%', boxSizing: 'border-box', background: '#1D1A15', border: `1px solid ${err ? '#C2553B' : hair}`, borderRadius: '10px', padding: '13px', paddingRight: '44px', color: '#F4EFE7', fontSize: '16px' }} />
+          <EyeToggle on={show} onClick={() => setShow(s => !s)} />
+        </div>
 
         {err && (
           <div style={{ background: 'rgba(196,106,90,0.12)', border: '1px solid rgba(196,106,90,0.4)', color: '#E0A095', borderRadius: '9px', padding: '10px 12px', fontSize: '13px', marginBottom: '14px' }}>{err}</div>

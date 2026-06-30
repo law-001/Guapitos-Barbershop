@@ -478,14 +478,28 @@ export default function App() {
     }
   };
 
+  // Turn a password-update failure into a clear message. Kept separate from
+  // authMsg (which is email/OTP-oriented and would call a 400 here an "invalid
+  // email"). Supabase's own password messages are clear, so we mostly surface
+  // them, special-casing an expired/missing recovery session.
+  const passwordErr = (e) => {
+    const raw = String(e?.message || e?.error_description || e?.msg || e?.error || '');
+    const t = raw.toLowerCase();
+    if (t.includes('session') || t.includes('jwt') || t.includes('not authenticated') || t.includes('expired'))
+      return 'Your reset link has expired. Request a new one from “Forgot password?” and try again.';
+    if (t.includes('different from the old')) return 'New password must be different from your current one.';
+    if (raw.trim()) return raw;   // e.g. "Password should be at least 6 characters."
+    return 'Could not update your password. Please try again.';
+  };
+
   // Save the new password chosen in the recovery modal. Returns an error string
   // on failure (the modal shows it), or null on success — after which we sign
   // out and drop the user on the staff login to sign in with the new password.
   const onSetNewPassword = async (password) => {
     try {
       const { error } = await updatePassword(password);
-      if (error) { console.error('updatePassword error', error); return authMsg(error); }
-    } catch (e) { console.error('updatePassword threw', e); return authMsg(e); }
+      if (error) { console.error('updatePassword error', error); return passwordErr(error); }
+    } catch (e) { console.error('updatePassword threw', e); return passwordErr(e); }
     signingOutRef.current = true;
     try { await signOut(); } catch (e) { console.error(e); }
     setTimeout(() => { signingOutRef.current = false; }, 1500);
