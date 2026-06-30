@@ -8,7 +8,7 @@ import { canRequestReset } from './lib/resetRateLimit';
 import { fetchStaffByEmail } from './lib/staffApi';
 import { sendEmailOtp, verifyEmailOtp, staffLogin, setSession, sendPasswordReset, updatePassword, onPasswordRecovery, signOut, getSession, onAuthChange } from './lib/auth';
 import { setRemember } from './lib/supabase';
-import { fetchUser, upsertUser, touchLogin } from './lib/usersApi';
+import { fetchUser, upsertUser, touchLogin, fetchAllUsers } from './lib/usersApi';
 import { isExpired, isSessionExpired, sessionMaxMs } from './lib/session';
 import HomeView from './views/HomeView';
 import BookingView from './views/BookingView';
@@ -92,6 +92,7 @@ const initState = {
   date: null,
   time: null,
   user: { signedIn: false, firstName: '', lastName: '', mobile: '', email: '' },
+  custPhones: {},        // admin: lowercased email -> saved mobile (from users.mobile)
   authStep: 'email',     // 'email' (enter address) | 'otp' (enter code)
   remember: false,       // "Keep me signed in" — checked = ~1mo & persist; unchecked (default) = ~24h
   emailInput: '',
@@ -363,6 +364,21 @@ export default function App() {
       fetchAllReviews()
         .then(rows => setState(s => ({ ...s, adminReviews: rows })))
         .catch(err => console.error('Supabase fetchAllReviews failed.', err));
+    }
+  }, [state.view, state.adminAuthed]);
+
+  // Load saved customer mobiles (users.mobile) for the admin once staff log in,
+  // keyed by lowercased email. Staff-only read (RLS 0020). The Customers page and
+  // drawers look phones up here by the booking's email.
+  useEffect(() => {
+    if (state.view === 'admin' && state.adminAuthed) {
+      fetchAllUsers()
+        .then(rows => {
+          const map = {};
+          for (const u of rows) { if (u.email && u.mobile) map[u.email.toLowerCase()] = u.mobile; }
+          setState(s => ({ ...s, custPhones: map }));
+        })
+        .catch(err => console.error('Supabase fetchAllUsers failed.', err));
     }
   }, [state.view, state.adminAuthed]);
 

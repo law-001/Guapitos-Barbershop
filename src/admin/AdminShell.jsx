@@ -202,7 +202,7 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
             <RecordsPage bookings={s.bookings} openDrawer={openDrawer}/>
           )}
           {page==='customers' && (
-            <CustomersPage bookings={s.bookings} openCust={openCust}/>
+            <CustomersPage bookings={s.bookings} openCust={openCust} custPhones={s.custPhones || {}}/>
           )}
           {page==='reviews' && (
             <ReviewsPage reviews={s.adminReviews} onApprove={onApproveReview} onReject={onRejectReview}/>
@@ -212,10 +212,10 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
 
       {/* DRAWERS */}
       {s.drawerId && (
-        <BookingDrawer bookings={s.bookings} drawerId={s.drawerId} closeDrawer={closeDrawer} setBookingStatus={setBookingStatus} toggleFollowUp={toggleFollowUp} onUpdateBooking={onUpdateBooking} onCheckIn={onCheckIn} user={s.user} showConfirm={showConfirm} startEdit={s.drawerEdit} openEditN={s.openEditN}/>
+        <BookingDrawer bookings={s.bookings} drawerId={s.drawerId} closeDrawer={closeDrawer} setBookingStatus={setBookingStatus} toggleFollowUp={toggleFollowUp} onUpdateBooking={onUpdateBooking} onCheckIn={onCheckIn} user={s.user} showConfirm={showConfirm} startEdit={s.drawerEdit} openEditN={s.openEditN} custPhones={s.custPhones || {}}/>
       )}
       {s.custName && (
-        <CustomerDrawer bookings={s.bookings} custName={s.custName} closeCust={closeCust} openDrawer={openDrawer}/>
+        <CustomerDrawer bookings={s.bookings} custName={s.custName} closeCust={closeCust} openDrawer={openDrawer} custPhones={s.custPhones || {}}/>
       )}
       {newBookingOpen && (
         <AdminNewBookingDrawer

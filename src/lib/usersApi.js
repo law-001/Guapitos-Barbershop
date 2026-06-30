@@ -60,6 +60,14 @@ export async function touchLogin(email) {
   return ts
 }
 
+// Fetch every saved customer (staff-only read under RLS 0020). Used by the admin
+// Customers page + drawers to show real saved mobiles, keyed by email.
+export async function fetchAllUsers() {
+  const { data, error } = await supabase.from(TABLE).select('email, first_name, last_name, mobile')
+  if (error) throw error
+  return (data || []).map(fromRow)
+}
+
 // Read just the stored login timestamp for this email (null when no row yet).
 export async function fetchLoginAt(email) {
   const addr = norm(email)

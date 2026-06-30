@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { barberById, statusMeta, tint, ticketOf, timeLabel, durLabel, peso, genSlots, firstFree, iso, todayDate } from '../helpers';
 import { PHONES, BARBERS } from '../data';
 
-export default function BookingDrawer({ bookings, drawerId, closeDrawer, setBookingStatus, toggleFollowUp, onUpdateBooking, onCheckIn, user, showConfirm, startEdit, openEditN }) {
+export default function BookingDrawer({ bookings, drawerId, closeDrawer, setBookingStatus, toggleFollowUp, onUpdateBooking, onCheckIn, user, showConfirm, startEdit, openEditN, custPhones = {} }) {
   const [editing, setEditing] = useState(false);
   const [rDate, setRDate] = useState(null);
   const [rBarber, setRBarber] = useState('any');
@@ -63,7 +63,7 @@ export default function BookingDrawer({ bookings, drawerId, closeDrawer, setBook
   }; };
   const statuses = STATUS_ORDER.map(mk);
   const checkInLabel = db.checkedInAt ? new Date(db.checkedInAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) : null;
-  const phone = PHONES[db.customer]||(db.mine&&user?.mobile)||'No number';
+  const phone = custPhones[(db.email||'').toLowerCase()]||PHONES[db.customer]||(db.mine&&user?.mobile)||'No number';
 
   return (
     <div style={{position:'fixed',inset:'0',zIndex:'90',display:'flex',justifyContent:'flex-end'}}>

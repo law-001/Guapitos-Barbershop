@@ -1,0 +1,5 @@
+-- Seed snapshot: public.email_throttle
+-- No seed rows. This table is runtime-only state, written exclusively by the
+-- public.email_rate_check helper as the `booking-confirm` Edge Function reserves
+-- sends. Windows reset on their own after p_window_secs of inactivity. Nothing
+-- to seed.

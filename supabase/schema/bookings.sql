@@ -23,32 +23,46 @@ create index if not exists bookings_barber_idx on public.bookings (barber);
 create index if not exists bookings_email_idx  on public.bookings (email);
 
 alter table public.bookings enable row level security;
--- Reads are owner-or-staff (migration 0019). The public booking screen reads the
--- companion view public.bookings_occupancy (no PII) for availability instead of
--- this table.
+-- Reads are owner-or-staff (migration 0019) AND a fresh session (migration 0022).
+-- The public booking screen reads the companion view public.bookings_occupancy
+-- (no PII, ungated) for availability instead of this table.
 create policy "bookings read own or staff"
   on public.bookings for select
   using (
-    (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
-    or public.is_staff()
+    public.session_fresh()
+    and (
+      (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
+      or public.is_staff()
+    )
   );
--- Writes are owner-or-staff (migration 0018). Owner = signed-in customer whose
--- verified email is on the row; staff = active row in public.staff (is_staff()).
+-- Writes are owner-or-staff (migration 0018) AND a fresh session (migration 0022).
+-- Owner = signed-in customer whose verified email is on the row; staff = active
+-- row in public.staff (is_staff()). session_fresh() = last sign-in within the
+-- absolute ceiling (see schema/users.sql).
 create policy "bookings insert own or staff"
   on public.bookings for insert
   with check (
-    (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
-    or public.is_staff()
+    public.session_fresh()
+    and (
+      (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
+      or public.is_staff()
+    )
   );
 create policy "bookings update own or staff"
   on public.bookings for update
   using (
-    (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
-    or public.is_staff()
+    public.session_fresh()
+    and (
+      (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
+      or public.is_staff()
+    )
   )
   with check (
-    (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
-    or public.is_staff()
+    public.session_fresh()
+    and (
+      (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
+      or public.is_staff()
+    )
   );
 -- No DELETE policy → deletes denied for anon + authenticated (cancel = status change).
 

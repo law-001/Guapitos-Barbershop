@@ -5,6 +5,10 @@
 // Edge Function. The client only sends already-formatted display strings; this
 // function just drops them into the HTML and hands it to Resend.
 //
+// Auth: NOT an open relay. The caller must carry a real Supabase session — a
+// customer may only email their own verified address; staff may email any
+// recipient. CORS is locked to APP_URL. See the auth gate in the handler.
+//
 // The HTML copies the magic-link email's look: dark warm card, tan accent,
 // cream text. It lists every booking detail and adds Reschedule / Cancel
 // buttons that deep-link back into the app (?b=<id>&do=reschedule|cancel),
@@ -19,18 +23,33 @@
 // Deploy:  supabase functions deploy booking-confirm
 //   secrets: supabase secrets set RESEND_API_KEY=... EMAIL_FROM=... APP_URL=...
 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const EMAIL_FROM = Deno.env.get("EMAIL_FROM") ?? "";
 const APP_URL = (Deno.env.get("APP_URL") ?? "").replace(/\/$/, "");
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
+// Auto-injected by Supabase; used to verify the caller's JWT and to read the
+// `staff` table under that caller's RLS (so a non-staff token can't pass the
+// staff check).
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+
+// CORS allowlist: the deployed site (APP_URL) plus any local dev server
+// (localhost / 127.0.0.1 on any port). The function echoes the caller's Origin
+// back when it's on the list — so BOTH production and a Vite dev server pass
+// preflight, while an arbitrary third-party site does not. (The real security
+// boundary is the auth gate in the handler; CORS just blocks casual cross-site
+// calls.) A single fixed origin would break local dev — hence the allowlist.
+const ALLOWED_ORIGINS = new Set([APP_URL].filter(Boolean));
+const isDevOrigin = (o: string) => /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o);
+const corsHeaders = (origin: string) => ({
+  "Access-Control-Allow-Origin":
+    origin && (ALLOWED_ORIGINS.has(origin) || isDevOrigin(origin)) ? origin : (APP_URL || "*"),
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+  "Vary": "Origin",
+});
 
 // Minimal HTML escape so customer-entered text (name, notes) can't break markup.
 const esc = (s: unknown) =>
@@ -105,6 +124,11 @@ function buildHtml(p: Record<string, string>) {
 }
 
 Deno.serve(async (req) => {
+  // Per-request CORS so the allowed origin reflects this caller (prod or dev).
+  const CORS = corsHeaders(req.headers.get("Origin") ?? "");
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ result: "error", message: "Method not allowed." }, 405);
 
@@ -113,9 +137,44 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // ── Auth gate: this is NOT an open email relay ──────────────────────────
+    // Require a real Supabase session. supabase.functions.invoke attaches the
+    // signed-in user's access token (customers after OTP verify, staff after
+    // staff-login) as the Bearer token; an unauthenticated caller carries only
+    // the anon key, whose getUser() resolves to no user → rejected.
+    const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false },
+    });
+    const { data: { user } } = await userClient.auth.getUser(token);
+    const callerEmail = (user?.email ?? "").trim().toLowerCase();
+    if (!callerEmail) return json({ result: "error", message: "Sign in required." }, 401);
+
     const p = await req.json().catch(() => ({}));
     const to = String(p.to ?? "").trim();
     if (!to) return json({ result: "error", message: "Recipient email is required." });
+
+    // A customer may only email their own verified address; staff may email any
+    // recipient (walk-in / phone-booking confirmations). The staff check reads
+    // the caller's own staff row under RLS (migration 0020), so a non-staff
+    // token cannot satisfy it.
+    let allowed = to.toLowerCase() === callerEmail;
+    if (!allowed) {
+      const { data: staffRow } = await userClient
+        .from("staff").select("id").eq("email", callerEmail).eq("active", true).maybeSingle();
+      allowed = Boolean(staffRow);
+    }
+    if (!allowed) return json({ result: "error", message: "Not allowed to email this address." }, 403);
+
+    // ── Rate limit: protect the shared Resend quota ─────────────────────────
+    // Reserve a send slot for this caller (migration 0021). Staff are exempt in
+    // the RPC. Fail OPEN: only block on an explicit allowed:false, so a DB hiccup
+    // or a not-yet-applied migration never drops a legitimate confirmation.
+    const { data: rl } = await userClient.rpc("email_rate_check");
+    if (rl && rl.allowed === false) {
+      return json({ result: "rate_limited", retry_after: rl.retry_after ?? 600 }, 429);
+    }
 
     const html = buildHtml(p);
 

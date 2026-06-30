@@ -1,7 +1,7 @@
 import { PHONES } from '../data';
 import { barberById, statusMeta, peso } from '../helpers';
 
-export default function CustomerDrawer({ bookings, custName, closeCust, openDrawer }) {
+export default function CustomerDrawer({ bookings, custName, closeCust, openDrawer, custPhones = {} }) {
   if(!custName) return null;
   const accent = '#D6C3A0';
 
@@ -10,6 +10,10 @@ export default function CustomerDrawer({ bookings, custName, closeCust, openDraw
     const tb=new Date(b.date+'T00:00:00').getTime()+b.start*60000;
     return tb-ta;
   });
+  // Saved mobile, looked up by the customer's booking email (falls back to the
+  // static PHONES seed for demo names).
+  const custEmail = (cb.find(b=>b.email)?.email || '').toLowerCase();
+  const custPhone = custPhones[custEmail] || PHONES[custName] || 'No number';
   const cvisits = cb.filter(b=>b.status!=='cancelled').length;
   const cspent = cb.filter(b=>b.status==='completed').reduce((a,b)=>a+b.price,0);
   const lastB = cb.find(b=>b.status!=='cancelled');
@@ -32,7 +36,7 @@ export default function CustomerDrawer({ bookings, custName, closeCust, openDraw
             <span style={{flexShrink:'0',width:'56px',height:'56px',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'Oswald'",fontWeight:'700',fontSize:'20px',color:accent,background:'#1D1A15',border:'1px solid #2A2622'}}>{initials}</span>
             <div style={{flex:'1',minWidth:'0'}}>
               <div style={{fontFamily:"'Oswald'",fontSize:'23px',lineHeight:'1.1'}}>{custName}</div>
-              <div style={{fontSize:'13.5px',color:'#9A9388'}}>{PHONES[custName]||'No number'}</div>
+              <div style={{fontSize:'13.5px',color:'#9A9388'}}>{custPhone}</div>
             </div>
           </div>
 

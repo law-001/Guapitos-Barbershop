@@ -20,8 +20,10 @@ create policy "reviews read" on public.reviews for select
 -- Anyone can submit, but non-staff submissions must be unapproved (no self-publish).
 create policy "reviews insert" on public.reviews for insert
   with check (approved = false or public.is_staff());
--- Only staff can approve (update) or remove (delete).
+-- Only staff can approve (update) or remove (delete), and only from a fresh
+-- session (migration 0023). Read + insert stay open (public reads / anon submit).
 create policy "reviews update" on public.reviews for update
-  using (public.is_staff()) with check (public.is_staff());
+  using (public.session_fresh() and public.is_staff())
+  with check (public.session_fresh() and public.is_staff());
 create policy "reviews delete" on public.reviews for delete
-  using (public.is_staff());
+  using (public.session_fresh() and public.is_staff());
