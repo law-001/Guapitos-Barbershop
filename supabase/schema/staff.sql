@@ -13,9 +13,21 @@ create table if not exists public.staff (
 create index if not exists staff_role_idx on public.staff (role);
 
 alter table public.staff enable row level security;
-create policy "staff read"   on public.staff for select using (true);
-create policy "staff insert" on public.staff for insert with check (true);
-create policy "staff update" on public.staff for update using (true) with check (true);
+-- Owner-or-staff (migration 0020). The self-email clause lets a just-signed-in
+-- member read their own row; is_staff() (defined below, SECURITY DEFINER) covers
+-- the full roster. Writes are staff-only; initial provisioning runs as
+-- service_role / via the SQL editor, which bypass RLS.
+create policy "staff read" on public.staff for select
+  using (public.is_staff() or lower(email) = lower(auth.jwt() ->> 'email'));
+-- Writes also require a fresh session (migration 0023). Read stays ungated so
+-- staff login / password-recovery / admin auto-unlock work from a recovery
+-- session whose last_sign_in_at may be stale.
+create policy "staff insert" on public.staff for insert
+  with check (public.session_fresh() and public.is_staff());
+create policy "staff update" on public.staff for update
+  using (public.session_fresh() and public.is_staff())
+  with check (public.session_fresh() and public.is_staff());
+-- No DELETE policy → deactivate via active=false, not row deletes.
 
 -- Staff identity check used by other tables' RLS (e.g. reviews). True when the
 -- signed-in JWT email matches an active staff row.

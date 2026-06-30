@@ -58,7 +58,7 @@ function Pagination({ page, totalPages, totalCount, perPage, setPage, setPerPage
   );
 }
 
-export default function CustomersPage({ bookings, openCust }) {
+export default function CustomersPage({ bookings, openCust, custPhones = {} }) {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
@@ -78,7 +78,8 @@ export default function CustomersPage({ bookings, openCust }) {
   for(const b of bookings){
     if(b.customer==='Walk-in') continue;
     const k=b.customer;
-    if(!custMap[k]) custMap[k]={name:k,bookings:[],spent:0,last:''};
+    if(!custMap[k]) custMap[k]={name:k,email:'',bookings:[],spent:0,last:''};
+    if(b.email) custMap[k].email=b.email;
     custMap[k].bookings.push(b);
     if(b.status==='completed') custMap[k].spent+=b.price;
     if(b.status!=='cancelled'&&(!custMap[k].last||b.date>custMap[k].last)) custMap[k].last=b.date;
@@ -88,7 +89,8 @@ export default function CustomersPage({ bookings, openCust }) {
     const cnt={}; c.bookings.forEach(b=>cnt[b.barber]=(cnt[b.barber]||0)+1);
     const pref=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0];
     const bar=barberById(pref);
-    return {name:c.name,phone:PHONES[c.name]||'No number',visits,spent:c.spent,last:c.last,prefName:bar?.name||'—',prefColor:bar?.color||'#9A9388'};
+    const phone=custPhones[(c.email||'').toLowerCase()]||PHONES[c.name]||'No number';
+    return {name:c.name,phone,visits,spent:c.spent,last:c.last,prefName:bar?.name||'—',prefColor:bar?.color||'#9A9388'};
   });
 
   const q = search.trim().toLowerCase();
