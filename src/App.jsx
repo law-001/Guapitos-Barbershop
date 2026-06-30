@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { iso, todayDate, timeLabel, genId, dateFull, durLabel, peso, barberById } from './helpers';
-import { fetchBookings, insertBooking, updateBooking as apiUpdateBooking, markOverdueNoShows } from './lib/bookingsApi';
+import { fetchBookings, fetchOccupancy, insertBooking, updateBooking as apiUpdateBooking, markOverdueNoShows } from './lib/bookingsApi';
 import { fetchReviews, fetchAllReviews, insertReview, approveReview, deleteReview } from './lib/reviewsApi';
 import { canPostReview, recordReviewPost } from './lib/reviewRateLimit';
 import { canRequestReset } from './lib/resetRateLimit';
@@ -104,6 +104,7 @@ const initState = {
   lastBooking: null,
   reschedulingId: null,
   bookings: [],
+  occupancy: [],          // no-PII slot availability (public view); drives the picker
   reviews: [],            // public list — approved reviews only
   adminReviews: [],       // admin moderation list — all reviews incl. pending
   reviewModalOpen: false,
@@ -246,12 +247,21 @@ export default function App() {
   const sweepRef = useRef(applyNoShows);
   useEffect(() => { sweepRef.current = applyNoShows; });
 
-  // Load live bookings from Supabase on mount, then run the no-show check.
-  // The DB is the source of truth, so an empty result shows an empty schedule.
+  // Pull the booking rows the current session is allowed to see (own for a
+  // customer, all for staff — RLS decides) and run the no-show check. Called on
+  // mount AND whenever the auth session changes, because the scoped result
+  // depends on who's signed in (see the auth-change subscription below).
+  const refreshBookings = () => fetchBookings()
+    .then(rows => { setState(s => ({ ...s, bookings: rows })); sweepRef.current(overdueBooked(rows)); })
+    .catch(err => console.error('Supabase fetchBookings failed.', err));
+
+  // Load on mount: scoped bookings + the public (no-PII) occupancy feed that
+  // drives the slot picker for everyone, signed in or not.
   useEffect(() => {
-    fetchBookings()
-      .then(rows => { setState(s => ({ ...s, bookings: rows })); sweepRef.current(overdueBooked(rows)); })
-      .catch(err => console.error('Supabase fetchBookings failed.', err));
+    refreshBookings();
+    fetchOccupancy()
+      .then(rows => setState(s => ({ ...s, occupancy: rows })))
+      .catch(err => console.error('Supabase fetchOccupancy failed.', err));
   }, []);
 
   // Load customer reviews once on mount (Reviews page reads from state.reviews).
@@ -298,6 +308,10 @@ export default function App() {
     }).catch(err => { console.error('getSession failed', err); if (active) onState({ sessionChecked: true }); });
 
     const unsub = onAuthChange((session) => {
+      // Re-pull bookings whenever the session changes: now that reads are scoped
+      // by RLS, a customer's own rows only come back once their session is
+      // attached (and clear back to none on sign-out).
+      refreshBookings();
       if (!session && signedInRef.current && !signingOutRef.current) {
         expireRef.current('Your session expired — please sign in again.');
       }
@@ -387,14 +401,20 @@ export default function App() {
     // Stamp the local copy so it sorts to the top of Recent activity right away;
     // the DB sets its own created_at (used after the next refetch).
     const local = { ...bk, createdAt: bk.createdAt || new Date().toISOString() };
-    onState(st => ({ bookings: [...st.bookings, local] }));
+    const occ = { id: bk.id, date: bk.date, barber: bk.barber, start: bk.start, dur: bk.dur, status: bk.status };
+    onState(st => ({ bookings: [...st.bookings, local], occupancy: [...st.occupancy, occ] }));
     insertBooking(bk).catch(err => console.error('Supabase insertBooking failed.', err));
     showToast('Booking created', 'success');
   };
 
   // Update by id with a camelCase patch (status / followUp / date / start / barber).
   const onUpdateBooking = (id, patch) => {
-    onState(st => ({ bookings: st.bookings.map(b => b.id === id ? { ...b, ...patch } : b) }));
+    // Mirror status/date/start/barber changes into occupancy so the picker stays
+    // accurate in-session (e.g. cancelling frees the slot immediately).
+    onState(st => ({
+      bookings: st.bookings.map(b => b.id === id ? { ...b, ...patch } : b),
+      occupancy: st.occupancy.map(o => o.id === id ? { ...o, ...patch } : o),
+    }));
     apiUpdateBooking(id, patch).catch(err => console.error('Supabase updateBooking failed.', err));
     // Plain-language notification for whatever just changed.
     if (patch.date !== undefined || patch.start !== undefined) {

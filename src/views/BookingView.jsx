@@ -59,10 +59,14 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     window.scrollTo({top:0});
   };
 
+  // Availability is computed from the public, no-PII occupancy feed (state.occupancy)
+  // — not state.bookings, which after the read-privacy lock only holds the
+  // customer's OWN rows. occupancy carries every booking's date/barber/time/status.
+  const occ = s.occupancy || [];
   const firstFreeLocal = (date,start,dur,excludeId) => {
     for(const b of BARBERS){
       const end=start+dur;
-      const conflicts = s.bookings.filter(bk=>bk.barber===b.id && bk.date===date && bk.status!=='cancelled' && bk.id!==excludeId);
+      const conflicts = occ.filter(bk=>bk.barber===b.id && bk.date===date && bk.status!=='cancelled' && bk.id!==excludeId);
       if(!conflicts.some(bk=>start<bk.start+bk.dur && end>bk.start)) return b.id;
     }
     return null;
@@ -105,7 +109,7 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     window.scrollTo({top:0});
   };
 
-  const slots = genSlots(s.bookings, s.date, s.barber, totalDur(), leadHours, s.reschedulingId);
+  const slots = genSlots(occ, s.date, s.barber, totalDur(), leadHours, s.reschedulingId);
 
   // "Active" bookings = ALL of this signed-in customer's upcoming bookings
   // (not cancelled/completed, still in the future), earliest first. Used to warn
