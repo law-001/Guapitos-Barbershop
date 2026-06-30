@@ -75,3 +75,14 @@ export async function updateBooking(id, patch) {
   const { error } = await supabase.from(TABLE).update(row).eq('id', id)
   if (error) throw error
 }
+
+// Mark every overdue 'booked' appointment as 'no-show' on the server (see
+// migration 0017). Runs as a SECURITY DEFINER function so it works even when the
+// table's direct UPDATE is locked down by RLS. Returns the ids it changed so the
+// caller can mirror the change locally. A server pg_cron job runs the same thing
+// every minute, so this is the live-UI path, not the only guarantee.
+export async function markOverdueNoShows() {
+  const { data, error } = await supabase.rpc('mark_overdue_no_shows')
+  if (error) throw error
+  return (data || []).map(r => r.id)
+}

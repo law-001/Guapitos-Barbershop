@@ -23,6 +23,24 @@ create index if not exists bookings_barber_idx on public.bookings (barber);
 create index if not exists bookings_email_idx  on public.bookings (email);
 
 alter table public.bookings enable row level security;
-create policy "bookings read"   on public.bookings for select using (true);
-create policy "bookings insert" on public.bookings for insert with check (true);
-create policy "bookings update" on public.bookings for update using (true) with check (true);
+-- Reads stay open: the public booking screen needs occupancy to offer free slots.
+create policy "bookings read" on public.bookings for select using (true);
+-- Writes are owner-or-staff (migration 0018). Owner = signed-in customer whose
+-- verified email is on the row; staff = active row in public.staff (is_staff()).
+create policy "bookings insert own or staff"
+  on public.bookings for insert
+  with check (
+    (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
+    or public.is_staff()
+  );
+create policy "bookings update own or staff"
+  on public.bookings for update
+  using (
+    (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
+    or public.is_staff()
+  )
+  with check (
+    (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
+    or public.is_staff()
+  );
+-- No DELETE policy → deletes denied for anon + authenticated (cancel = status change).
