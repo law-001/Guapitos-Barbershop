@@ -18,6 +18,33 @@ export async function verifyEmailOtp(email, token) {
   return supabase.auth.verifyOtp({ email, token, type: 'email' })
 }
 
+// Email + password sign-in — used by the staff console. The account (with its
+// password) is created by the owner in the Supabase dashboard; this just signs
+// them in. Staff access is then gated by the staff-table check in the app.
+export async function signInWithPassword(email, password) {
+  return supabase.auth.signInWithPassword({ email, password })
+}
+
+// Email a password-reset link. `redirectTo` is where the link lands back in the
+// app (must be listed in Supabase → Authentication → URL Configuration). Opening
+// that link signs the user into a short recovery session and fires a
+// PASSWORD_RECOVERY event (see onPasswordRecovery) so we can show a "set new
+// password" form.
+export async function sendPasswordReset(email, redirectTo) {
+  return supabase.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined)
+}
+
+// Set a new password for the currently-signed-in (recovery) session.
+export async function updatePassword(password) {
+  return supabase.auth.updateUser({ password })
+}
+
+// Fire `cb` when Supabase detects the user arrived via a password-reset link.
+export function onPasswordRecovery(cb) {
+  const { data } = supabase.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') cb() })
+  return () => data.subscription?.unsubscribe()
+}
+
 export async function signOut() {
   return supabase.auth.signOut()
 }

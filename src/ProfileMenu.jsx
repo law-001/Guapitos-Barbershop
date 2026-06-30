@@ -1,8 +1,7 @@
 // Signed-in profile chip in the top bar. Shows a circular generic-person SVG
 // avatar + the user's first name (or email), and opens a dropdown with:
-//   1) My profile        → goProfile()
-//   2) My appointments   → goAccount()
-//   3) Sign out          → onSignOut()
+//   1) Profile & appointments → goAccount()  (one combined account page)
+//   2) Sign out               → onSignOut()
 // On mobile (<= 540px), the name is hidden via the `gb-profile-name` class
 // (see index.css) so just the round avatar remains tappable.
 import { useEffect, useRef, useState } from 'react';
@@ -14,7 +13,7 @@ const PersonIcon = ({ size = 18, color = '#0E0E0E' }) => (
   </svg>
 );
 
-export default function ProfileMenu({ user, goProfile, goAccount, onSignOut }) {
+export default function ProfileMenu({ user, goAccount, onSignOut }) {
   const accent = '#D6C3A0';
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -32,9 +31,9 @@ export default function ProfileMenu({ user, goProfile, goAccount, onSignOut }) {
 
   const pick = (fn) => { setOpen(false); fn(); };
 
+  // Combined: profile + appointments live on one page now (AccountView).
   const items = [
-    { key: 'profile', label: 'My profile', onClick: () => pick(goProfile) },
-    { key: 'appts', label: 'My appointments', onClick: () => pick(goAccount) },
+    { key: 'account', label: 'Profile & appointments', onClick: () => pick(goAccount) },
     { key: 'signout', label: 'Sign out', onClick: () => pick(onSignOut), danger: true },
   ];
 
@@ -51,7 +50,7 @@ export default function ProfileMenu({ user, goProfile, goAccount, onSignOut }) {
 
       {open && (
         <div role="menu"
-          style={{ position: 'absolute', top: 'calc(100% + 8px)', right: '0', minWidth: '220px', background: '#15130F', border: '1px solid #2A2622', borderRadius: '12px', padding: '8px', boxShadow: '0 12px 32px rgba(0,0,0,0.5)', zIndex: '70', animation: 'gbfade 0.16s ease both' }}>
+          style={{ position: 'absolute', top: 'calc(100% + 8px)', left: '0', minWidth: '220px', background: '#15130F', border: '1px solid #2A2622', borderRadius: '12px', padding: '8px', boxShadow: '0 12px 32px rgba(0,0,0,0.5)', zIndex: '70', animation: 'gbfade 0.16s ease both' }}>
           <div style={{ padding: '10px 12px 12px', borderBottom: '1px solid #2A2622', marginBottom: '6px' }}>
             <div style={{ fontFamily: "'Oswald'", fontSize: '14px', lineHeight: '1.2', color: '#F4EFE7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
             <div style={{ fontSize: '12px', color: '#9A9388', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.email}</div>

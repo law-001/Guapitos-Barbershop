@@ -1,9 +1,24 @@
-export default function HomeView({ goBook, goAccount, goAdmin, navServices }) {
+// Row of 5 stars; filled (gold) up to `value`, the rest dimmed.
+const Stars = ({ value = 0, size = 15 }) => (
+  <span style={{display:'inline-flex',gap:'2px',lineHeight:'1'}} aria-label={`${value} out of 5 stars`}>
+    {[1,2,3,4,5].map(n=>(
+      <span key={n} style={{color:n<=Math.round(value)?'#D6C3A0':'#3A352D',fontSize:size+'px'}}>★</span>
+    ))}
+  </span>
+);
+
+export default function HomeView({ goBook, goAccount, goAdmin, navServices, goReviews, reviews = [], onWriteReview }) {
   const pole = {
     display:'inline-block',width:'54px',height:'6px',borderRadius:'3px',
     background:'repeating-linear-gradient(135deg,#D6C3A0 0 7px,#15130F 7px 14px)',
     backgroundSize:'40px 100%',animation:'gbpole 1.6s linear infinite'
   };
+  // Overall rating + the few reviews to feature on the landing page.
+  const reviewCount = reviews.length;
+  const avgRating = reviewCount ? reviews.reduce((s,r)=>s+(r.rating||0),0)/reviewCount : 0;
+  // Feature the written reviews first (star-only ones make for empty cards).
+  const featured = [...reviews].sort((a,b)=>(b.body?1:0)-(a.body?1:0)).slice(0, 3);
+  const initialOf = (name) => (name||'?').trim().charAt(0).toUpperCase();
 
   return (
     <main>
@@ -99,6 +114,56 @@ export default function HomeView({ goBook, goAccount, goAdmin, navServices }) {
           <img src="/assets/shop-2.jpg" alt="Product shelf" loading="lazy" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'14px',border:'1px solid #2A2622'}}/>
           <img src="/assets/shop-3.jpg" alt="Chair under the bearded-gentleman mural" loading="lazy" style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'14px',border:'1px solid #2A2622'}}/>
         </div>
+      </section>
+
+      {/* REVIEWS — featured customer reviews pulled from the `reviews` table
+          (mirrored from Guapito's Google Maps listing). Shows the average rating,
+          a few featured cards, and a link to the full list / Google. */}
+      <section id="gb-reviews" style={{borderTop:'1px solid #2A2622',padding:'clamp(48px,8vw,90px) clamp(16px,5vw,80px)',maxWidth:'1240px',margin:'0 auto'}}>
+        <div style={{display:'flex',alignItems:'flex-end',justifyContent:'space-between',flexWrap:'wrap',gap:'16px',marginBottom:'34px'}}>
+          <div>
+            <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'13px',color:'#D6C3A0',marginBottom:'10px'}}>What clients say</div>
+            <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(30px,5vw,52px)',margin:'0',lineHeight:'1'}}>Reviews</h2>
+            {reviewCount>0 && (
+              <div style={{display:'flex',alignItems:'center',gap:'10px',marginTop:'14px'}}>
+                <span style={{fontFamily:"'Oswald'",fontWeight:'700',fontSize:'26px',color:'#D6C3A0',lineHeight:'1'}}>{avgRating.toFixed(1)}</span>
+                <Stars value={avgRating} size={18}/>
+                <span style={{color:'#9A9388',fontSize:'14px'}}>· {reviewCount} {reviewCount===1?'review':'reviews'}</span>
+              </div>
+            )}
+          </div>
+          <button onClick={onWriteReview}
+            style={{background:'transparent',color:'#D6C3A0',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px',border:'1px solid #2A2622',borderRadius:'8px',padding:'13px 22px',cursor:'pointer'}}>Write review</button>
+        </div>
+
+        {reviewCount===0 ? (
+          <div style={{background:'#15130F',border:'1px solid #2A2622',borderRadius:'16px',padding:'40px 30px',textAlign:'center',color:'#9A9388'}}>
+            No reviews yet — <button onClick={onWriteReview} style={{background:'none',border:'none',color:'#D6C3A0',cursor:'pointer',fontSize:'inherit',padding:'0',textDecoration:'underline'}}>be the first</button>.
+          </div>
+        ) : (
+          <>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:'18px'}}>
+              {featured.map(r=>(
+                <div key={r.id} style={{background:'#15130F',border:'1px solid #2A2622',borderRadius:'16px',padding:'24px',display:'flex',flexDirection:'column',gap:'14px'}}>
+                  <Stars value={r.rating} size={16}/>
+                  {r.body && <p style={{color:'#F4EFE7',fontSize:'15px',lineHeight:'1.55',margin:'0',flex:'1'}}>“{r.body}”</p>}
+                  <div style={{display:'flex',alignItems:'center',gap:'12px',marginTop:'2px'}}>
+                    <span style={{flexShrink:'0',display:'flex',alignItems:'center',justifyContent:'center',width:'40px',height:'40px',borderRadius:'50%',background:'#D6C3A0',color:'#0E0E0E',fontFamily:"'Oswald'",fontWeight:'700',fontSize:'18px'}}>{initialOf(r.author)}</span>
+                    <div style={{minWidth:'0'}}>
+                      <div style={{fontFamily:"'Oswald'",fontSize:'16px',lineHeight:'1.2'}}>{r.author}</div>
+                      {(r.relativeTime || r.reviewDate) && <div style={{color:'#9A9388',fontSize:'13px'}}>{r.relativeTime || new Date(r.reviewDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',year:'numeric'})}</div>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {reviewCount>featured.length && (
+              <div style={{textAlign:'center',marginTop:'28px'}}>
+                <button onClick={goReviews} style={{background:'transparent',color:'#F4EFE7',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px',border:'1px solid #2A2622',borderRadius:'8px',padding:'14px 28px',cursor:'pointer'}}>Read all {reviewCount} reviews →</button>
+              </div>
+            )}
+          </>
+        )}
       </section>
 
       {/* VISIT */}

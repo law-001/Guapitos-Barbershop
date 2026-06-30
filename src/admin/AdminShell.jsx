@@ -5,11 +5,12 @@ import DashboardPage from './DashboardPage';
 import CalendarPage from './CalendarPage';
 import RecordsPage from './RecordsPage';
 import CustomersPage from './CustomersPage';
+import ReviewsPage from './ReviewsPage';
 import BookingDrawer from './BookingDrawer';
 import CustomerDrawer from './CustomerDrawer';
 import AdminNewBookingDrawer from './AdminNewBookingDrawer';
 
-export default function AdminShell({ state, onState, onCreateBooking, onUpdateBooking, onCheckIn, showConfirm }) {
+export default function AdminShell({ state, onState, onCreateBooking, onUpdateBooking, onCheckIn, showConfirm, onApproveReview, onRejectReview, onAdminSignOut }) {
   const s = state;
   const [newBookingOpen, setNewBookingOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -65,7 +66,8 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
     onState({calIso:iso(d)});
   };
 
-  const pageTitles = {dashboard:'Dashboard',records:'Records',calendar:'Calendar',customers:'Customers'};
+  const pageTitles = {dashboard:'Dashboard',records:'Records',calendar:'Calendar',customers:'Customers',reviews:'Reviews'};
+  const pendingReviews = (s.adminReviews || []).filter(r => !r.approved).length;
 
   const sv = (children) => (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:'0'}}>
@@ -78,6 +80,7 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
     calendar:  sv(<><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></>),
     records:   sv(<><path d="M4 6h16M4 12h16M4 18h10"/></>),
     customers: sv(<><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></>),
+    reviews:   sv(<><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.2l1-5.8L3.5 9.2l5.9-.9z"/></>),
     collapse:  sv(<><path d="M15 18l-6-6 6-6"/></>),
     expand:    sv(<><path d="M9 18l6-6-6-6"/></>),
     signout:   sv(<><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l-5-5 5-5M5 12h12"/></>),
@@ -122,6 +125,13 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
           {navBtn('calendar',  icons.calendar,  'Schedule')}
           {navBtn('records',   icons.records,   'Records')}
           {navBtn('customers', icons.customers, 'Customers')}
+          {/* Reviews nav: pending count badge so flooding is visible at a glance. */}
+          <button onClick={()=>setPage('reviews')} title="Reviews"
+            style={{display:'flex',alignItems:'center',gap:'13px',cursor:'pointer',background:navBg('reviews'),border:'none',borderRadius:'10px',padding:'11px 12px',color:navCol('reviews'),fontFamily:"'Hanken Grotesk'",fontWeight:'600',fontSize:'14.5px',whiteSpace:'nowrap',width:'100%'}}>
+            {icons.reviews}
+            {showLabel && <span style={{flex:'1',textAlign:'left'}}>Reviews</span>}
+            {pendingReviews>0 && <span style={{flexShrink:'0',minWidth:'18px',height:'18px',padding:'0 5px',borderRadius:'999px',background:accent,color:'#0E0E0E',fontFamily:"'Oswald'",fontWeight:'700',fontSize:'11px',display:'flex',alignItems:'center',justifyContent:'center'}}>{pendingReviews}</span>}
+          </button>
         </nav>
         <div style={{padding:'12px',flexShrink:'0',borderTop:'1px solid #2A2622',display:'flex',flexDirection:'column',gap:'6px'}}>
           {!isMobile && (
@@ -131,7 +141,7 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
               {navOpen && <span>Collapse</span>}
             </button>
           )}
-          <button onClick={()=>onState({adminAuthed:false,adminUser:'',adminPass:'',adminErr:'',view:'home'})} title="Sign out"
+          <button onClick={onAdminSignOut} title="Sign out"
             style={{display:'flex',alignItems:'center',gap:'13px',cursor:'pointer',background:'transparent',border:'none',borderRadius:'10px',padding:'10px 12px',color:'#9A9388',fontSize:'14px',whiteSpace:'nowrap',width:'100%'}}>
             {icons.signout}
             {showLabel && <span>Sign out</span>}
@@ -193,6 +203,9 @@ export default function AdminShell({ state, onState, onCreateBooking, onUpdateBo
           )}
           {page==='customers' && (
             <CustomersPage bookings={s.bookings} openCust={openCust}/>
+          )}
+          {page==='reviews' && (
+            <ReviewsPage reviews={s.adminReviews} onApprove={onApproveReview} onReject={onRejectReview}/>
           )}
         </div>
       </div>

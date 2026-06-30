@@ -1,9 +1,17 @@
+import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { SERVICES, CATS, BARBERS } from '../data';
-import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, addDays, genId } from '../helpers';
+import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, addDays, genId, nowMs } from '../helpers';
 
 export default function BookingView({ state, goHome, goAccount, goBook, onState, onCreateBooking, onUpdateBooking, onSendOtp, onVerifyOtp, onSaveProfile, onToggleRemember, leadHours=1, onlinePayEnabled=true }) {
   const s = state;
   const accent='#D6C3A0', hair='#2A2622';
+  // Tracks whether the "you already have a booking" popup was dismissed so the
+  // customer can proceed to book another without it reappearing this session.
+  const [warnDismissed, setWarnDismissed] = useState(false);
+  // Holds the existing booking that overlaps the slot the customer is trying to
+  // confirm (same person, same time, any barber) — drives the clash warning popup.
+  const [clashBooking, setClashBooking] = useState(null);
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.emailInput.trim());
   const fullName = `${s.user.firstName} ${s.user.lastName}`.trim();
 
@@ -59,8 +67,21 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     return null;
   };
 
-  const finalize = () => {
+  // Self-clash = this same customer already has an upcoming booking that overlaps
+  // the chosen slot, regardless of barber. You can't sit in two chairs at once,
+  // so booking June 30 9:00 with barber B while already booked 9:00 with barber A
+  // is almost always a mistake. Returns that existing booking (or null).
+  const findSelfClash = (date,start,dur) => {
+    if(!(s.user.signedIn && s.user.email) || !date || start==null) return null;
+    const end=start+dur;
+    return s.bookings.find(b=>b.email===s.user.email && b.date===date
+      && b.status!=='cancelled' && b.status!=='completed' && b.id!==s.reschedulingId
+      && start<b.start+b.dur && end>b.start) || null;
+  };
+
+  const finalize = (force=false) => {
     const dur=totalDur();
+    if(!force){ const clash=findSelfClash(s.date,s.time,dur); if(clash){ setClashBooking(clash); return; } }
     const assigned = s.barber==='any' ? firstFreeLocal(s.date,s.time,dur,null) : s.barber;
     const ref='GB-'+Math.random().toString(36).slice(2,7).toUpperCase();
     const names=s.cart.map(id=>svcById(id).name);
@@ -82,6 +103,17 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
   };
 
   const slots = genSlots(s.bookings, s.date, s.barber, totalDur(), leadHours, s.reschedulingId);
+
+  // "Active" bookings = ALL of this signed-in customer's upcoming bookings
+  // (not cancelled/completed, still in the future), earliest first. Used to warn
+  // them on the service step that they already have bookings, each with its own
+  // quick reschedule jump.
+  const startMs = b => new Date(b.date+'T00:00:00').getTime()+b.start*60000;
+  const activeBookings = (s.user.signedIn && s.user.email)
+    ? s.bookings.filter(b=>b.email===s.user.email && b.status!=='cancelled' && b.status!=='completed' && startMs(b)>=nowMs())
+        .sort((a,b)=>startMs(a)-startMs(b))
+    : [];
+  const goReschedule = (b) => { onState({view:'book',step:'datetime',reschedulingId:b.id,barber:b.barber,date:null,time:null,cart:[]}); window.scrollTo({top:0}); };
 
   const cont = {service:'Continue',barber:'Continue',datetime:s.reschedulingId?'Confirm new time':'Continue',signin:'Continue',details:'Continue',
     payment:s.payMethod==='online'?'Pay & confirm':'Reserve appointment'}[s.step]||'Continue';
@@ -183,9 +215,14 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
                 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(96px,1fr))',gap:'9px'}}>
                   {slots.map(sl=>{
                     const sel=s.time===sl.min;
+                    // Block slots that overlap a booking THIS customer already has
+                    // (any barber) — they can't be in two chairs at once.
+                    const selfBusy = !!findSelfClash(s.date, sl.min, totalDur());
+                    const avail = sl.avail && !selfBusy;
                     return (
-                      <button key={sl.min} onClick={()=>{ if(sl.avail) onState({time:sl.min}); }} disabled={!sl.avail}
-                        style={{cursor:sl.avail?'pointer':'not-allowed',background:sel?accent:'#15130F',border:'1.5px solid '+(sel?accent:hair),borderRadius:'10px',padding:'12px 4px',fontFamily:"'Oswald'",fontWeight:'500',fontSize:'15px',color:sel?'#0E0E0E':'#F4EFE7',opacity:sl.avail?1:0.32,textDecoration:sl.avail?'none':'line-through'}}>{timeLabel(sl.min)}</button>
+                      <button key={sl.min} onClick={()=>{ if(avail) onState({time:sl.min}); }} disabled={!avail}
+                        title={selfBusy?'You already have a booking at this time':undefined}
+                        style={{cursor:avail?'pointer':'not-allowed',background:sel?accent:'#15130F',border:'1.5px solid '+(sel?accent:hair),borderRadius:'10px',padding:'12px 4px',fontFamily:"'Oswald'",fontWeight:'500',fontSize:'15px',color:sel?'#0E0E0E':'#F4EFE7',opacity:avail?1:0.32,textDecoration:avail?'none':'line-through'}}>{timeLabel(sl.min)}</button>
                     );
                   })}
                 </div>
@@ -346,6 +383,65 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
           </div>
         </div>
       )}
+
+      {/* ALREADY-BOOKED POPUP — centered modal shown when this signed-in customer
+          lands on the service step with an active upcoming booking and isn't
+          mid-reschedule. Dismiss to book another, or jump into rescheduling.
+          Portaled to <body> so the fixed overlay anchors to the viewport (centered
+          on screen regardless of scroll), not to the animated <main> container. */}
+      {s.step==='service' && !s.reschedulingId && activeBookings.length>0 && !warnDismissed && createPortal((
+        <div style={{position:'fixed',inset:'0',zIndex:'180',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+          <div onClick={()=>setWarnDismissed(true)} style={{position:'absolute',inset:'0',background:'rgba(0,0,0,0.65)',animation:'gbback 0.18s ease both'}}></div>
+          <div role="dialog" aria-modal="true" aria-label="You already have upcoming bookings"
+            style={{position:'relative',width:'min(460px,94vw)',maxHeight:'88vh',overflowY:'auto',background:'#15130F',border:'1px solid '+hair,borderRadius:'16px',padding:'clamp(22px,4vw,30px)',boxShadow:'0 20px 60px rgba(0,0,0,0.55)',animation:'gbfade 0.2s ease both'}}>
+            <button onClick={()=>setWarnDismissed(true)} aria-label="Close"
+              style={{position:'absolute',top:'12px',right:'12px',background:'transparent',border:'none',color:'#9A9388',cursor:'pointer',fontSize:'22px',lineHeight:'1',padding:'4px 8px'}}>×</button>
+            <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'12px',color:accent,marginBottom:'8px'}}>Heads up</div>
+            <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(22px,4vw,30px)',margin:'0 0 6px',lineHeight:'1.05'}}>{activeBookings.length===1?'You already have a booking':`You already have ${activeBookings.length} bookings`}</h2>
+            <p style={{color:'#9A9388',margin:'0 0 16px',fontSize:'14px'}}>Here's everything upcoming. Want to change the time of one instead of making a new booking?</p>
+            <div style={{display:'flex',flexDirection:'column',gap:'10px',marginBottom:'18px'}}>
+              {activeBookings.map(b=>(
+                <div key={b.id} style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:'12px',background:'#1D1A15',border:'1px solid '+hair,borderRadius:'12px',padding:'14px 16px'}}>
+                  <div style={{flex:'1',minWidth:'160px'}}>
+                    <div style={{fontFamily:"'Oswald'",fontSize:'17px'}}>{new Date(b.date+'T00:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})} · {timeLabel(b.start)}</div>
+                    <div style={{color:'#9A9388',fontSize:'14px',marginTop:'3px'}}>{b.service} · with {barberById(b.barber)?.name||'First available'}</div>
+                  </div>
+                  <button onClick={()=>goReschedule(b)} style={{flexShrink:'0',cursor:'pointer',background:accent,color:'#0E0E0E',border:'none',borderRadius:'9px',padding:'10px 16px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.04em',textTransform:'uppercase',fontSize:'13px'}}>Reschedule</button>
+                </div>
+              ))}
+            </div>
+            <button onClick={()=>setWarnDismissed(true)} style={{width:'100%',cursor:'pointer',background:'transparent',color:'#F4EFE7',border:'1px solid '+hair,borderRadius:'10px',padding:'14px',fontWeight:'600',fontSize:'14px'}}>Book another</button>
+          </div>
+        </div>
+      ), document.body)}
+
+      {/* SELF-CLASH (TROLL) WARNING — fires at the confirm step when the customer
+          tries to book a slot that overlaps a booking they already have, with any
+          barber (you can't be in two chairs at once). Options: jump to reschedule
+          the existing one, go back and pick another time, or override and book
+          anyway. Portaled to <body> so it's screen-centered. */}
+      {clashBooking && createPortal((
+        <div style={{position:'fixed',inset:'0',zIndex:'190',display:'flex',alignItems:'center',justifyContent:'center',padding:'20px'}}>
+          <div onClick={()=>setClashBooking(null)} style={{position:'absolute',inset:'0',background:'rgba(0,0,0,0.65)',animation:'gbback 0.18s ease both'}}></div>
+          <div role="dialog" aria-modal="true" aria-label="Booking time clash"
+            style={{position:'relative',width:'min(460px,94vw)',maxHeight:'88vh',overflowY:'auto',background:'#15130F',border:'1px solid #C2553B',borderRadius:'16px',padding:'clamp(22px,4vw,30px)',boxShadow:'0 20px 60px rgba(0,0,0,0.55)',animation:'gbfade 0.2s ease both'}}>
+            <button onClick={()=>setClashBooking(null)} aria-label="Close"
+              style={{position:'absolute',top:'12px',right:'12px',background:'transparent',border:'none',color:'#9A9388',cursor:'pointer',fontSize:'22px',lineHeight:'1',padding:'4px 8px'}}>×</button>
+            <div style={{fontFamily:"'Oswald'",letterSpacing:'0.22em',textTransform:'uppercase',fontSize:'12px',color:'#E08A6E',marginBottom:'8px'}}>Time clash</div>
+            <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(22px,4vw,30px)',margin:'0 0 10px',lineHeight:'1.05'}}>You can't be in two chairs at once</h2>
+            <p style={{color:'#9A9388',margin:'0 0 14px',fontSize:'14px'}}>This overlaps a booking you already have:</p>
+            <div style={{background:'#1D1A15',border:'1px solid '+hair,borderRadius:'12px',padding:'14px 16px',marginBottom:'12px'}}>
+              <div style={{fontFamily:"'Oswald'",fontSize:'17px'}}>{new Date(clashBooking.date+'T00:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})} · {timeLabel(clashBooking.start)}</div>
+              <div style={{color:'#9A9388',fontSize:'14px',marginTop:'3px'}}>{clashBooking.service} · with {barberById(clashBooking.barber)?.name||'First available'}</div>
+            </div>
+            <p style={{color:'#9A9388',margin:'0 0 20px',fontSize:'14px'}}>You're trying to book {timeLabel(s.time)} with {selBarberName}.</p>
+            <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+              <button onClick={()=>{ setClashBooking(null); goReschedule(clashBooking); }} style={{width:'100%',cursor:'pointer',background:accent,color:'#0E0E0E',border:'none',borderRadius:'10px',padding:'14px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.05em',textTransform:'uppercase',fontSize:'14px'}}>Reschedule that booking instead</button>
+              <button onClick={()=>{ setClashBooking(null); onState({step:'datetime',time:null}); window.scrollTo({top:0}); }} style={{width:'100%',cursor:'pointer',background:'#1D1A15',color:'#F4EFE7',border:'1px solid '+hair,borderRadius:'10px',padding:'14px',fontWeight:'600',fontSize:'14px'}}>Pick a different time</button>
+            </div>
+          </div>
+        </div>
+      ), document.body)}
     </main>
   );
 }
