@@ -1,0 +1,5 @@
+-- Seed snapshot: public.login_throttle
+-- No seed rows. This table is runtime-only state, written exclusively by the
+-- `staff-login` Edge Function (service_role) as staff sign-in attempts happen.
+-- Rows auto-expire from relevance after 24h of no failures and are deleted on a
+-- successful login. Nothing to seed.
