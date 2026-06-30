@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
-import { iso, todayDate, timeLabel, genId } from './helpers';
-import { fetchBookings, insertBooking, updateBooking as apiUpdateBooking } from './lib/bookingsApi';
+import { iso, todayDate, timeLabel, genId, dateFull, durLabel, peso, barberById } from './helpers';
+import { fetchBookings, insertBooking, updateBooking as apiUpdateBooking, markOverdueNoShows } from './lib/bookingsApi';
 import { fetchReviews, fetchAllReviews, insertReview, approveReview, deleteReview } from './lib/reviewsApi';
 import { canPostReview, recordReviewPost } from './lib/reviewRateLimit';
 import { canRequestReset } from './lib/resetRateLimit';
@@ -36,6 +36,18 @@ const urlLooksLikeRecovery = () => {
   try {
     return (window.location.hash || '').includes('type=recovery') || /[?&]code=/.test(window.location.search || '');
   } catch { return false; }
+};
+
+// Booking-confirmation email deep-links land here as ?b=<id>&do=reschedule|cancel.
+// Parse them once on load; returns { id, do } or null. The handler effect below
+// acts on it (after bookings load) and then strips the params from the URL.
+const readEmailAction = () => {
+  try {
+    const q = new URLSearchParams(window.location.search || '');
+    const id = q.get('b'); const action = q.get('do'); const email = q.get('e') || '';
+    if (id && (action === 'reschedule' || action === 'cancel')) return { id, do: action, email };
+  } catch { /* ignore */ }
+  return null;
 };
 
 // Human-friendly wait time for a lockout countdown ("45s" / "5m").
@@ -122,6 +134,10 @@ const initState = {
   //  - null      → just close
   authModalOpen: false,
   postAuthAction: null,
+  // Flips true once the mount-time Supabase session restore has settled. The
+  // email-link handler waits for this so it doesn't treat a still-restoring
+  // session as "signed out" and pop the sign-in modal by mistake.
+  sessionChecked: false,
 };
 
 // Auto no-show: a 'booked' appointment that is >10 min past its start time
@@ -147,6 +163,13 @@ export default function App() {
   // Latest bookings, readable from interval callbacks without stale closures.
   const bookingsRef = useRef(state.bookings);
   useEffect(() => { bookingsRef.current = state.bookings; });
+
+  // Pending reschedule/cancel from a confirmation-email link, applied once the
+  // bookings have loaded (so the target booking exists). Cleared after one use.
+  const emailActionRef = useRef(readEmailAction());
+  // Guards the one-time sign-in prompt for an email action, so re-renders (e.g.
+  // bookings finishing loading) don't reset the modal while the user is typing.
+  const emailAuthPromptedRef = useRef(false);
 
   // Current signed-in flag + user, kept fresh so the interval/subscription
   // callbacks below read them without stale closures or re-subscribing.
@@ -210,7 +233,9 @@ export default function App() {
   const applyNoShows = (overdue) => {
     if (!overdue.length) return;
     const ids = new Set(overdue.map(b => b.id));
-    overdue.forEach(b => apiUpdateBooking(b.id, { status: 'no-show' }).catch(err => console.error('Supabase no-show failed.', err)));
+    // Persist via the server function (safe under tightened RLS); a pg_cron job
+    // runs the same sweep, so this is just for an instant in-tab update.
+    markOverdueNoShows().catch(err => console.error('Supabase no-show sweep failed.', err));
     onState(s => ({
       bookings: s.bookings.map(b => ids.has(b.id) ? { ...b, status: 'no-show' } : b),
       toast: { message: overdue.length === 1 ? '1 appointment auto-marked No Show' : overdue.length + ' appointments auto-marked No Show', type: 'danger' },
@@ -255,20 +280,22 @@ export default function App() {
     if (recoveringRef.current) return undefined;
     let active = true;
     getSession().then(async (session) => {
-      if (!active || !session?.user?.email) return;
+      if (!active) return;
+      if (!session?.user?.email) { onState({ sessionChecked: true }); return; }
       const addr = session.user.email;
       let saved = null;
       try { saved = await fetchUser(addr); } catch { /* offline / no row — just don't prefill */ }
       if (saved && isExpired(saved.loginAt)) {
         await expireRef.current('Your session has expired. Please sign in again.');
+        if (active) onState({ sessionChecked: true });
         return;
       }
       onState({ user: {
         signedIn: true, email: addr,
         firstName: saved?.firstName || '', lastName: saved?.lastName || '', mobile: saved?.mobile || '',
         loginAt: saved?.loginAt || null,
-      } });
-    }).catch(err => console.error('getSession failed', err));
+      }, sessionChecked: true });
+    }).catch(err => { console.error('getSession failed', err); if (active) onState({ sessionChecked: true }); });
 
     const unsub = onAuthChange((session) => {
       if (!session && signedInRef.current && !signingOutRef.current) {
@@ -392,6 +419,75 @@ export default function App() {
   const showAlert = (message, opts = {}) =>
     onState({ dialog: { message, title: opts.title || 'Heads up', confirmText: opts.okText || 'OK' } });
   const closeDialog = () => onState({ dialog: null });
+
+  // Full booking summary shown inside the cancel confirmation modal so the
+  // customer can see exactly what they're about to cancel. (Dialog renders the
+  // `message` as a node, so JSX is fine here.)
+  const cancelDetails = (bk) => {
+    const rows = [
+      ['Service', bk.service],
+      ['Date', dateFull(bk.date)],
+      ['Time', timeLabel(bk.start)],
+      ['Duration', durLabel(bk.dur)],
+      ['Barber', barberById(bk.barber)?.name || 'First available'],
+      ['Payment', bk.pay === 'online' ? 'Paid online' : 'Pay at shop'],
+      ['Total', peso(bk.price)],
+    ];
+    if (bk.customer) rows.unshift(['Name', bk.customer]);
+    if (bk.notes) rows.push(['Notes', bk.notes]);
+    return (
+      <div>
+        <div style={{ marginBottom: '14px' }}>Cancel this booking? This can&apos;t be undone.</div>
+        <div style={{ background: '#0E0E0E', border: '1px solid #2A2622', borderRadius: '10px', padding: '2px 14px' }}>
+          {rows.map(([k, v], i) => (
+            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: '14px', padding: '8px 0', borderTop: i ? '1px solid #211E1A' : 'none' }}>
+              <span style={{ color: '#9A9388', fontSize: '13px', whiteSpace: 'nowrap' }}>{k}</span>
+              <span style={{ color: '#F4EFE7', fontSize: '13px', fontWeight: '600', textAlign: 'right' }}>{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Act on a confirmation-email link (?b=<id>&do=reschedule|cancel&e=<email>).
+  // Order of events: wait for the session restore to settle; if the visitor is
+  // not signed in, pop the sign-in modal PREFILLED with the booking's email so
+  // they re-auth as the right account — this effect re-runs after sign-in and
+  // resumes. Once signed in AND the bookings have loaded, verify the booking is
+  // theirs, then reschedule or cancel. Runs once, then strips the URL params.
+  useEffect(() => {
+    const act = emailActionRef.current;
+    if (!act || !state.sessionChecked) return;
+
+    // Not signed in yet → prompt sign-in once, prefilled with the linked email.
+    if (!state.user.signedIn) {
+      if (!emailAuthPromptedRef.current) {
+        emailAuthPromptedRef.current = true;
+        onState({ authModalOpen: true, postAuthAction: 'emailAction', authStep: 'email',
+          emailInput: act.email || '', otpInput: '', authBusy: false, authErr: '', devCode: '' });
+      }
+      return;
+    }
+
+    if (state.bookings.length === 0) return; // signed in — wait for bookings to load
+
+    emailActionRef.current = null; // one-shot
+    try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+
+    const bk = state.bookings.find(b => b.id === act.id);
+    if (!bk) { showAlert("We couldn't find that booking. It may have been removed."); return; }
+    // Ownership: only let the signed-in account act on its own booking.
+    const owned = !bk.email || !state.user.email || bk.email.toLowerCase() === state.user.email.toLowerCase();
+    if (!owned) { showAlert('That booking is under a different account. Sign in with the email it was booked under.'); return; }
+    if (bk.status === 'cancelled' || bk.status === 'completed') {
+      showAlert(`This booking is already ${bk.status}.`); return;
+    }
+    if (act.do === 'reschedule') { reopenReschedule(act.id); return; }
+    showConfirm(cancelDetails(bk),
+      () => { onUpdateBooking(act.id, { status: 'cancelled' }); closeDialog(); },
+      { title: 'Cancel booking', confirmText: 'Cancel booking', cancelText: 'Keep it', danger: true });
+  }, [state.bookings, state.user.signedIn, state.sessionChecked]);
 
   const goHome = () => { onState({ view: 'home' }); window.scrollTo({ top: 0 }); };
   const goBook = () => { onState({ view: 'book', step: 'service', cart: [], barber: 'any', date: null, time: null, payMethod: null, notes: '', reschedulingId: null, authStep: 'email', emailInput: '', otpInput: '', authBusy: false, authErr: '' }); window.scrollTo({ top: 0 }); };

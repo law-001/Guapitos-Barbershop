@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SERVICES, CATS, BARBERS } from '../data';
-import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, addDays, genId, nowMs } from '../helpers';
+import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, addDays, genId, nowMs, dateFull } from '../helpers';
+import { sendBookingConfirmation } from '../lib/bookingEmail';
 
 export default function BookingView({ state, goHome, goAccount, goBook, onState, onCreateBooking, onUpdateBooking, onSendOtp, onVerifyOtp, onSaveProfile, onToggleRemember, leadHours=1, onlinePayEnabled=true }) {
   const s = state;
@@ -87,6 +88,7 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     const names=s.cart.map(id=>svcById(id).name);
     const bk={id:genId('u'),date:s.date,start:s.time,dur,barber:assigned,service:names.join(' + '),price:totalPrice(),customer:fullName||'You',email:s.user.email||'',status:'booked',mine:true,pay:s.payMethod,notes:s.notes,followUp:false};
     onCreateBooking(bk);
+    sendBookingConfirmation(bk,ref);   // fire-and-forget styled confirmation email
     onState({lastRef:ref,lastBooking:bk,step:'confirmation'});
     window.scrollTo({top:0});
   };
@@ -98,6 +100,7 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     const patch={date:s.date,start:s.time,barber:assigned,status:'booked'};
     onUpdateBooking(id,patch);
     const updated={...s.bookings.find(b=>b.id===id),...patch};
+    sendBookingConfirmation(updated,ref);   // email the updated details after a reschedule
     onState({reschedulingId:null,lastRef:ref,lastBooking:updated,step:'confirmation'});
     window.scrollTo({top:0});
   };
@@ -120,21 +123,37 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
 
   const lb = s.lastBooking;
   const selBarberName = s.barber==='any'?'First available barber':(barberById(s.barber)?.name||'');
+  // The booking being rescheduled (null on a normal booking) — drives the
+  // dedicated reschedule header + "current → new" banner so the screen can't be
+  // mistaken for a fresh booking.
+  const reb = s.reschedulingId ? s.bookings.find(x=>x.id===s.reschedulingId) : null;
 
   return (
     <main style={{maxWidth:'880px',margin:'0 auto',padding:'clamp(20px,4vw,40px) clamp(16px,4vw,32px) 140px',animation:'gbfade 0.4s ease both'}}>
-      {/* Progress */}
-      <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'30px',flexWrap:'wrap'}}>
-        {visible.map((k,i)=>{
-          const idx=order.indexOf(k); const done=idx<curIdx; const active=idx===curIdx;
-          return (
-            <div key={k} style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:'28px',height:'28px',borderRadius:'50%',fontFamily:"'Oswald'",fontWeight:'600',fontSize:'14px',background:active?accent:(done?'rgba(214,195,160,0.18)':'transparent'),color:active?'#0E0E0E':(done?accent:'#9A9388'),border:'1px solid '+(active?accent:hair)}}>{i+1}</span>
-              <span style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.06em',fontSize:'12px',color:active?'#F4EFE7':'#9A9388'}}>{labels[k]}</span>
-            </div>
-          );
-        })}
-      </div>
+      {/* Reschedule header (replaces the booking progress bar so this screen is
+          unmistakably a reschedule, not a new booking). */}
+      {s.reschedulingId ? (
+        <div style={{display:'flex',alignItems:'center',gap:'12px',marginBottom:'26px',background:'rgba(214,195,160,0.10)',border:'1px solid '+accent,borderRadius:'13px',padding:'14px 18px'}}>
+          <span style={{flexShrink:'0',fontSize:'22px'}}>↻</span>
+          <div>
+            <div style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.10em',fontSize:'13px',color:accent,fontWeight:'700'}}>Rescheduling your appointment</div>
+            <div style={{color:'#9A9388',fontSize:'13px',marginTop:'2px'}}>Just pick a new slot below — everything else stays the same.</div>
+          </div>
+        </div>
+      ) : (
+        /* Progress */
+        <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'30px',flexWrap:'wrap'}}>
+          {visible.map((k,i)=>{
+            const idx=order.indexOf(k); const done=idx<curIdx; const active=idx===curIdx;
+            return (
+              <div key={k} style={{display:'flex',alignItems:'center',gap:'6px'}}>
+                <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:'28px',height:'28px',borderRadius:'50%',fontFamily:"'Oswald'",fontWeight:'600',fontSize:'14px',background:active?accent:(done?'rgba(214,195,160,0.18)':'transparent'),color:active?'#0E0E0E':(done?accent:'#9A9388'),border:'1px solid '+(active?accent:hair)}}>{i+1}</span>
+                <span style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.06em',fontSize:'12px',color:active?'#F4EFE7':'#9A9388'}}>{labels[k]}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* STEP: SERVICE */}
       {s.step==='service' && (
@@ -190,8 +209,50 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
       {/* STEP: DATETIME */}
       {s.step==='datetime' && (
         <div>
-          <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(26px,4vw,40px)',margin:'0 0 6px'}}>Date &amp; time</h2>
+          <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(26px,4vw,40px)',margin:'0 0 6px'}}>{s.reschedulingId?'Pick a new time':'Date & time'}</h2>
           <p style={{color:'#9A9388',margin:'0 0 22px'}}>{s.reschedulingId?'Pick a new slot — same service length, no extra charge.':'Open Mon–Sat, 9:00 AM – 7:00 PM. Showing only genuinely free slots for your '+durLabel(totalDur()||45)+' booking.'}</p>
+
+          {/* Reschedule "current → new" banner: shows what's moving so there's no
+              doubt this is a reschedule of an existing booking. */}
+          {reb && (
+            <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:'10px 16px',background:'#15130F',border:'1px solid '+hair,borderRadius:'13px',padding:'14px 18px',marginBottom:'22px'}}>
+              <div style={{fontFamily:"'Oswald'",fontWeight:'700',fontSize:'15px',color:'#F4EFE7',marginRight:'4px'}}>{reb.service}</div>
+              <div style={{display:'flex',alignItems:'center',gap:'10px'}}>
+                <span style={{textAlign:'left'}}>
+                  <span style={{display:'block',fontSize:'11px',textTransform:'uppercase',letterSpacing:'0.08em',color:'#9A9388'}}>Current</span>
+                  <span style={{display:'block',fontSize:'14px',color:'#9A9388',textDecoration:'line-through'}}>{dateFull(reb.date)} · {timeLabel(reb.start)}</span>
+                  <span style={{display:'block',fontSize:'12px',color:'#9A9388',textDecoration:'line-through'}}>{barberById(reb.barber)?.name||'Barber'}</span>
+                </span>
+                <span style={{color:accent,fontSize:'18px'}}>→</span>
+                <span style={{textAlign:'left'}}>
+                  <span style={{display:'block',fontSize:'11px',textTransform:'uppercase',letterSpacing:'0.08em',color:accent}}>New</span>
+                  <span style={{display:'block',fontSize:'14px',fontWeight:'700',color:(s.date&&s.time!=null)?accent:'#5A554E'}}>{(s.date&&s.time!=null)?`${dateFull(s.date)} · ${timeLabel(s.time)}`:'Choose below'}</span>
+                  <span style={{display:'block',fontSize:'12px',color:accent}}>{selBarberName}</span>
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Reschedule barber picker: change who cuts you while moving the slot.
+              Switching resets the chosen time since availability is per-barber. */}
+          {reb && (
+            <div style={{marginBottom:'22px'}}>
+              <div style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.12em',fontSize:'13px',color:accent,margin:'0 0 12px'}}>Barber</div>
+              <div style={{display:'flex',gap:'9px',overflowX:'auto',padding:'2px'}}>
+                {[{id:'any',name:'First available',initials:'★',color:accent},...BARBERS].map(b=>{
+                  const sel=s.barber===b.id;
+                  return (
+                    <button key={b.id} onClick={()=>onState({barber:b.id,time:null})}
+                      style={{flexShrink:'0',display:'flex',alignItems:'center',gap:'9px',cursor:'pointer',background:sel?'rgba(214,195,160,0.10)':'#15130F',border:'1.5px solid '+(sel?accent:hair),borderRadius:'999px',padding:'7px 14px 7px 7px',color:'#F4EFE7'}}>
+                      <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:'32px',height:'32px',borderRadius:'50%',fontFamily:"'Oswald'",fontWeight:'700',fontSize:'14px',background:sel?b.color:'#1D1A15',color:sel?'#0E0E0E':b.color,border:'2px solid '+b.color}}>{b.initials}</span>
+                      <span style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.04em',fontSize:'14px',whiteSpace:'nowrap'}}>{b.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div style={{display:'flex',gap:'10px',overflowX:'auto',padding:'4px 2px 14px',marginBottom:'8px'}}>
             {Array.from({length:14},(_,i)=>{
               const d=addDays(i); const isoStr=iso(d); const closed=d.getDay()===0; const sel=s.date===isoStr;
