@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SERVICES, CATS, BARBERS } from '../data';
-import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, addDays, genId, nowMs, dateFull } from '../helpers';
+import { durLabel, timeLabel, peso, svcById, barberById, genSlots, iso, addDays, genId, genRef, nowMs, dateFull, applyPackages, cartServiceLabel, PACKAGE_RECIPES } from '../helpers';
 import { sendBookingConfirmation } from '../lib/bookingEmail';
 
 export default function BookingView({ state, goHome, goAccount, goBook, onState, onCreateBooking, onUpdateBooking, onSendOtp, onVerifyOtp, onSaveProfile, onToggleRemember, leadHours=1, onlinePayEnabled=true }) {
@@ -15,6 +15,10 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
   const [clashBooking, setClashBooking] = useState(null);
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.emailInput.trim());
   const fullName = `${s.user.firstName} ${s.user.lastName}`.trim();
+  // Package-adjusted view of the current selection: collapses matching à-la-carte
+  // combos (e.g. Haircut + Shave) into their cheaper bundle. Drives the running
+  // total, chair-time estimate, and the saved booking's service/price/duration.
+  const pkg = applyPackages(s.cart);
 
   const navOrder = () => {
     const o=['service','barber','datetime'];
@@ -29,9 +33,9 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
 
   const totalDur = () => {
     if(s.reschedulingId){ const b=s.bookings.find(x=>x.id===s.reschedulingId); return b?b.dur:45; }
-    return s.cart.reduce((sum,id)=>sum+(svcById(id)?.dur||0),0);
+    return pkg.dur;
   };
-  const totalPrice = () => s.cart.reduce((sum,id)=>sum+(svcById(id)?.price||0),0);
+  const totalPrice = () => pkg.total;
 
   const continueDisabled = () => {
     if(s.step==='service') return s.cart.length===0;
@@ -59,10 +63,14 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     window.scrollTo({top:0});
   };
 
+  // Availability is computed from the public, no-PII occupancy feed (state.occupancy)
+  // — not state.bookings, which after the read-privacy lock only holds the
+  // customer's OWN rows. occupancy carries every booking's date/barber/time/status.
+  const occ = s.occupancy || [];
   const firstFreeLocal = (date,start,dur,excludeId) => {
     for(const b of BARBERS){
       const end=start+dur;
-      const conflicts = s.bookings.filter(bk=>bk.barber===b.id && bk.date===date && bk.status!=='cancelled' && bk.id!==excludeId);
+      const conflicts = occ.filter(bk=>bk.barber===b.id && bk.date===date && bk.status!=='cancelled' && bk.id!==excludeId);
       if(!conflicts.some(bk=>start<bk.start+bk.dur && end>bk.start)) return b.id;
     }
     return null;
@@ -84,9 +92,8 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     const dur=totalDur();
     if(!force){ const clash=findSelfClash(s.date,s.time,dur); if(clash){ setClashBooking(clash); return; } }
     const assigned = s.barber==='any' ? firstFreeLocal(s.date,s.time,dur,null) : s.barber;
-    const ref='GB-'+Math.random().toString(36).slice(2,7).toUpperCase();
-    const names=s.cart.map(id=>svcById(id).name);
-    const bk={id:genId('u'),date:s.date,start:s.time,dur,barber:assigned,service:names.join(' + '),price:totalPrice(),customer:fullName||'You',email:s.user.email||'',status:'booked',mine:true,pay:s.payMethod,notes:s.notes,followUp:false};
+    const ref=genRef();
+    const bk={id:genId('u'),date:s.date,start:s.time,dur,barber:assigned,service:cartServiceLabel(s.cart),price:totalPrice(),customer:fullName||'You',email:s.user.email||'',status:'booked',mine:true,pay:s.payMethod,notes:s.notes,followUp:false};
     onCreateBooking(bk);
     sendBookingConfirmation(bk,ref);   // fire-and-forget styled confirmation email
     onState({lastRef:ref,lastBooking:bk,step:'confirmation'});
@@ -96,7 +103,7 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
   const saveReschedule = () => {
     const id=s.reschedulingId; const dur=totalDur();
     const assigned = s.barber==='any' ? firstFreeLocal(s.date,s.time,dur,id) : s.barber;
-    const ref='GB-'+Math.random().toString(36).slice(2,7).toUpperCase();
+    const ref=genRef();
     const patch={date:s.date,start:s.time,barber:assigned,status:'booked'};
     onUpdateBooking(id,patch);
     const updated={...s.bookings.find(b=>b.id===id),...patch};
@@ -105,7 +112,37 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
     window.scrollTo({top:0});
   };
 
-  const slots = genSlots(s.bookings, s.date, s.barber, totalDur(), leadHours, s.reschedulingId);
+  // Recipes whose bundle is THIS service id (a combo package may have several,
+  // e.g. Cut & Treatment = cut+antidan OR cut+dryscalp).
+  const pkgRecipes = id => PACKAGE_RECIPES.filter(r=>r.pkg===id);
+
+  // Unified service-card toggle. Three jobs at once:
+  //  • exclusion groups — one cut / one hair color / one beard color (via `excl`).
+  //  • combo packages mirror their parts: picking a package drops its parts, and
+  //    picking a part drops any directly-chosen package that contains it — so a
+  //    package and its own components can NEVER both be in the cart (no double
+  //    charge from "Haircut + Shave + Cut & Shave package").
+  //  • clicking a package whose parts are already auto-bundled clears those parts.
+  const toggleService = (x) => onState(st => {
+    const cart = st.cart;
+    if(cart.includes(x.id)) return {cart:cart.filter(c=>c!==x.id),time:null};   // plain deselect
+    const recipes = pkgRecipes(x.id);
+    if(recipes.length){                                                          // x is a combo package
+      const active = recipes.find(r=>r.parts.every(p=>cart.includes(p)));
+      if(active) return {cart:cart.filter(c=>!active.parts.includes(c)),time:null}; // tile was lit by its parts → clear them
+      const partIds = new Set(recipes.flatMap(r=>r.parts));
+      let next = cart.filter(c=>!partIds.has(c));                                // drop this package's own loose parts
+      if(x.excl) next = next.filter(id=>svcById(id)?.excl!==x.excl);            // one per group (e.g. only one "Cut & …")
+      return {cart:[...next, x.id],time:null};                                  // select the package
+    }
+    // x is a regular service / package part
+    const owning = new Set(PACKAGE_RECIPES.filter(r=>r.parts.includes(x.id)).map(r=>r.pkg));
+    let next = owning.size ? cart.filter(c=>!owning.has(c)) : cart;              // drop a package that owns this part
+    if(x.excl) next = next.filter(id=>svcById(id)?.excl!==x.excl);              // drop same exclusion group
+    return {cart:[...next, x.id],time:null};
+  });
+
+  const slots = genSlots(occ, s.date, s.barber, totalDur(), leadHours, s.reschedulingId);
 
   // "Active" bookings = ALL of this signed-in customer's upcoming bookings
   // (not cancelled/completed, still in the future), earliest first. Used to warn
@@ -165,9 +202,11 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
               <div style={{fontFamily:"'Oswald'",textTransform:'uppercase',letterSpacing:'0.12em',fontSize:'13px',color:accent,marginBottom:'12px'}}>{cat}</div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(250px,1fr))',gap:'11px'}}>
                 {SERVICES.filter(x=>x.cat===cat).map(x=>{
-                  const sel=s.cart.includes(x.id);
+                  // A combo-package tile counts as selected once its parts are in the
+                  // cart (auto-bundled), so it can't be ticked again as a duplicate.
+                  const sel=s.cart.includes(x.id) || pkgRecipes(x.id).some(r=>r.parts.every(p=>s.cart.includes(p)));
                   return (
-                    <button key={x.id} onClick={()=>onState(st=>({cart:st.cart.includes(x.id)?st.cart.filter(c=>c!==x.id):[...st.cart,x.id],time:null}))}
+                    <button key={x.id} onClick={()=>toggleService(x)}
                       style={{textAlign:'left',cursor:'pointer',display:'flex',alignItems:'center',gap:'13px',background:sel?'rgba(214,195,160,0.08)':'#15130F',border:'1.5px solid '+(sel?accent:hair),borderRadius:'13px',padding:'15px 16px',color:'#F4EFE7'}}>
                       <span style={{flexShrink:'0',width:'22px',height:'22px',borderRadius:'6px',border:'1.5px solid '+(sel?accent:hair),background:sel?accent:'transparent',display:'flex',alignItems:'center',justifyContent:'center',color:'#0E0E0E',fontSize:'14px',fontWeight:'800'}}>{sel?'✓':''}</span>
                       <span style={{flex:'1',minWidth:'0'}}>
@@ -351,6 +390,13 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
           <h2 style={{fontFamily:"'Oswald'",fontWeight:'700',textTransform:'uppercase',fontSize:'clamp(26px,4vw,40px)',margin:'0 0 6px'}}>Your details</h2>
           <p style={{color:'#9A9388',margin:'0 0 26px'}}>So your barber knows who's coming in — and what you're after.</p>
           <div style={{maxWidth:'480px',display:'flex',flexDirection:'column',gap:'16px'}}>
+            {/* Locked email — pre-filled from the signed-in session and read-only.
+                Shows which account this booking is tied to; can't be edited here. */}
+            <div>
+              <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>Email <span style={{opacity:'0.6'}}>(can't be changed)</span></label>
+              <input type="email" value={s.user.email} readOnly tabIndex={-1} aria-readonly="true"
+                style={{width:'100%',boxSizing:'border-box',background:'#15130F',border:'1px solid #2A2622',borderRadius:'10px',padding:'14px',color:'#9A9388',fontSize:'16px',cursor:'not-allowed'}}/>
+            </div>
             <div style={{display:'flex',gap:'12px',flexWrap:'wrap'}}>
               <div style={{flex:'1',minWidth:'140px'}}>
                 <label style={{display:'block',fontSize:'13px',color:'#9A9388',marginBottom:'7px'}}>First name</label>
@@ -438,6 +484,9 @@ export default function BookingView({ state, goHome, goAccount, goBook, onState,
             <div style={{flex:'1',textAlign:'right',lineHeight:'1.2'}}>
               <div style={{fontFamily:"'Oswald'",fontWeight:'700',fontSize:'22px',color:accent}}>{peso(totalPrice())}</div>
               <div style={{color:'#9A9388',fontSize:'12px'}}>{totalDur()?('approx. '+durLabel(totalDur())+' in the chair'):'select services'}</div>
+              {/* Auto-package savings note — only when a detected bundle beat the
+                  separate prices (see applyPackages in helpers.js). */}
+              {pkg.saved>0 && <div style={{color:'#6FA886',fontSize:'12px',fontWeight:'600'}}>{pkg.packages.map(p=>p.pkg.name).join(' + ')} · saved {peso(pkg.saved)}</div>}
             </div>
             <button onClick={onContinue} disabled={disabled}
               style={{cursor:disabled?'not-allowed':'pointer',background:disabled?'#6b645b':accent,color:'#0E0E0E',border:'none',borderRadius:'9px',padding:'14px 26px',fontFamily:"'Oswald'",fontWeight:'600',letterSpacing:'0.06em',textTransform:'uppercase',fontSize:'15px',flexShrink:'0',opacity:disabled?0.45:1}}>{cont}</button>

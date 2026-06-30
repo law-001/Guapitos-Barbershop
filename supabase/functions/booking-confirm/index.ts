@@ -60,7 +60,7 @@ function buildHtml(p: Record<string, string>) {
         <tr>
           <td align="center">
             <p style="margin:0 0 6px;color:#D6C3A0;font-size:13px;letter-spacing:2px;text-transform:uppercase;font-weight:bold">Guapito's Barbershop</p>
-            <h1 style="margin:0 0 8px;color:#F4EFE7;font-size:24px;font-weight:bold">Booking confirmed ✂️</h1>
+            <h1 style="margin:0 0 8px;color:#F4EFE7;font-size:24px;font-weight:bold">Booking confirmed</h1>
             <p style="margin:0 0 24px;color:#9A9388;font-size:14px;line-height:1.5">Thanks${p.customer ? ", " + esc(p.customer) : ""}! Your appointment is locked in. Reference <strong style="color:#D6C3A0">${esc(p.ref)}</strong>.</p>
 
             <table width="100%" cellpadding="0" cellspacing="0" style="background:#0E0E0E;border:1px solid #2A2622;border-radius:12px;padding:8px 18px;margin:0 0 26px">
@@ -86,10 +86,19 @@ function buildHtml(p: Record<string, string>) {
             </table>
 
             <p style="margin:24px 0 0;color:#9A9388;font-size:13px;line-height:1.5">Need to change something? Use the buttons above any time before your slot.</p>
+
+            <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #2A2622;margin:24px 0 0">
+              <tr>
+                <td style="padding:18px 0 0">
+                  <p style="margin:0 0 12px;color:#9A9388;font-size:12px;line-height:1.6">Please be reminded that we will only allow a <strong style="color:#D6C3A0">10-minute holding time</strong> for every booked appointment. To avoid long queuing, please arrive on time for your appointment.</p>
+                  <p style="margin:0;color:#9A9388;font-size:12px;line-height:1.6">If you have any questions or need further assistance, please feel free to contact us.</p>
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>
       </table>
-      <p style="margin:18px 0 0;color:#5A554E;font-size:12px">Guapito's Barbershop · See you in the chair ✂️</p>
+      <p style="margin:18px 0 0;color:#5A554E;font-size:12px">Guapito's Barbershop · See you in the chair</p>
     </td>
   </tr>
 </table>`;

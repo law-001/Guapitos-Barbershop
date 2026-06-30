@@ -23,8 +23,15 @@ create index if not exists bookings_barber_idx on public.bookings (barber);
 create index if not exists bookings_email_idx  on public.bookings (email);
 
 alter table public.bookings enable row level security;
--- Reads stay open: the public booking screen needs occupancy to offer free slots.
-create policy "bookings read" on public.bookings for select using (true);
+-- Reads are owner-or-staff (migration 0019). The public booking screen reads the
+-- companion view public.bookings_occupancy (no PII) for availability instead of
+-- this table.
+create policy "bookings read own or staff"
+  on public.bookings for select
+  using (
+    (email is not null and lower(email) = lower(auth.jwt() ->> 'email'))
+    or public.is_staff()
+  );
 -- Writes are owner-or-staff (migration 0018). Owner = signed-in customer whose
 -- verified email is on the row; staff = active row in public.staff (is_staff()).
 create policy "bookings insert own or staff"
@@ -44,3 +51,10 @@ create policy "bookings update own or staff"
     or public.is_staff()
   );
 -- No DELETE policy → deletes denied for anon + authenticated (cancel = status change).
+
+-- Companion view (migration 0019) — public-readable availability with no PII.
+create or replace view public.bookings_occupancy
+  with (security_invoker = false) as
+  select id, date, barber, start_min, dur, status
+  from public.bookings;
+grant select on public.bookings_occupancy to anon, authenticated;

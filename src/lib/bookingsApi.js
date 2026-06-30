@@ -61,6 +61,18 @@ export async function fetchBookings() {
   return (data || []).map(fromRow)
 }
 
+// Public, no-PII availability feed (see migration 0019). Reads the
+// bookings_occupancy view, which anyone may read, so the slot picker works for
+// signed-out visitors and signed-in customers alike — without exposing names or
+// emails. Shape matches what genSlots/slotFree expect (camelCase `start`).
+export async function fetchOccupancy() {
+  const { data, error } = await supabase.from('bookings_occupancy').select('*')
+  if (error) throw error
+  return (data || []).map(r => ({
+    id: r.id, date: r.date, barber: r.barber, start: r.start_min, dur: r.dur, status: r.status,
+  }))
+}
+
 export async function insertBooking(booking) {
   const { error } = await supabase.from(TABLE).insert(toRow(booking))
   if (error) throw error
