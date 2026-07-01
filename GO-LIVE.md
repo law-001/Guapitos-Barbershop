@@ -10,8 +10,12 @@ Legend: 🖥️ = dashboard click-path · ⌨️ = terminal command.
 
 ## Pre-flight — database is fully migrated
 
-Confirm every migration `0001`–`0023` has been run in the **production** Supabase
-project (SQL Editor). Quick check in SQL Editor:
+Fresh project? Don't paste 23 files — paste **one**:
+[supabase/setup.sql](supabase/setup.sql) into the SQL Editor once. See
+[supabase/HANDOFF.md](supabase/HANDOFF.md).
+
+Then confirm every migration `0001`–`0023` is applied in the **production**
+Supabase project. Quick check in SQL Editor:
 
 ```sql
 select policyname, tablename from pg_policies
